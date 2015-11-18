@@ -119,7 +119,7 @@ $(makeLenses ''Counters)
 --        reduced NFA if we match language.
 --     2. (Net, NFA): we only convert Nets once.
 --     3. (NFA, NFA, Op, NFA) only perform the binary operation on NFAs once
-data MemoState = MemoState
+ data MemoState = MemoState
     { _counters :: !Counters
     , _knownNFAs :: !(Int, [NFALang])
     , _net2NFA :: !Net2NFAMap
@@ -132,10 +132,16 @@ type Sizes = (Int, Int, Int)
 type NFAEvalM = StateT MemoState IO
 
 exprEval :: forall r m . (Functor m, Monad m)
+         -- A function that'll turn nets into an "r" (whatever r ends up being)
          => (InterleavingMarkedNet -> m r)
+         -- A function to handle the sequential composition of two `r`s to produce a (monad-action producing a) value
          -> (r -> r -> m (Value m r))
+         -- A function to handle the tensor composition of two `r`s to produce a (monad-action producing a) value
          -> (r -> r -> m (Value m r))
+         -- A monadic "action" that'll produce an int (probably easiest to ignorethis for now)
          -> (m Int)
+         -- The expression we're evaluating 
+         -- return a monad action (where the monad is `m`) that produces the "value" that is the result of the evaluation
          -> Expr r -> m (Value m r)
 exprEval onConstant onSeq onTens getP expr = eval expr []
   where
@@ -295,6 +301,8 @@ expr2NFASlow getP expr = do
             sMaxNFAStateSize .= maxComp'
         return . VBase $ doCompose nfa1 nfa2
 
+-- this is the function that is the entry point for this module
+-- acts as the outputter variable in Run.hs
 expr2NFA :: IO Int -> Expr NFAWithBounds
          -> IO (NFAWithBounds, (Counters, Sizes))
 expr2NFA getP expr = do
@@ -309,6 +317,7 @@ expr2NFA getP expr = do
     doEval numberedExpr = do
         res <- exprEval onNet onSeq onTens (lift getP) numberedExpr
         case res of
+            -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
@@ -344,6 +353,7 @@ expr2NFA getP expr = do
                 return nfa'
 
     onSeq :: NFALang -> NFALang -> NFAEvalM (Value NFAEvalM NFALang)
+    -- Compose is an enumeration for the type of composition
     onSeq l r = doRecurse Compose l r $ \x y ->
         let badCompose =
                 error $ "Couldn't compose: " ++ show x ++ " and " ++ show y
@@ -361,6 +371,7 @@ expr2NFA getP expr = do
         let opTriple = (nfa1, nfa2, op)
         mbRes <- HM.lookup opTriple <$> use binOpMap
         case mbRes of
+            -- if we already have that composition then we just return the value from the map
             Just nfa -> known >> return (VBase nfa)
             Nothing -> do
                 unknown

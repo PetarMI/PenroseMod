@@ -88,6 +88,9 @@ data RawExpr = RVar VarId
              deriving (Eq, Show)
 
 -- Use a HOAS representation to avoid substitution/name-capture.
+-- represents the output of exprEval
+-- a value can finish as a lambda but nothing to apply it to
+-- a base type with a value p that depending on the mode can be net or an NFA
 data Value m p = VLam (Value m p -> m (Value m p))
                | VBase p
                | VInt Int
