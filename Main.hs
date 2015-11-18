@@ -22,9 +22,15 @@ main :: IO ()
 main = do
     (nonQuietArgs, isQuiet) <- processArgs <$> getArgs
     case nonQuietArgs of
+        -- check all the arguments that are passed when Penrose is run
+        -- these are the output type, file containing nets and optional ones
         (output : file : rest) -> do
             outputType <- parseOutputType output
+            -- Entry Point of execution
+            -- See what 'go' 'as' and 'q' are 
+            -- calls the correct runner is src/Run.hs
             let go as q = runner outputType file as >>= printRes q
+            -- check if the user has passed any of the optional parameters 
             case rest of
                 [] -> go Nothing isQuiet
                 as -> do
@@ -42,6 +48,7 @@ main = do
     parseOutputType :: String -> IO OutputType
     parseOutputType input = case readMay input of
         Nothing -> fail $ "Couldn't parse " ++ outputTypes ++ " " ++ input
+        -- return the value that was read wrapped in IO
         Just r -> return r
 
     printRes quiet (RawResult res, time) = do

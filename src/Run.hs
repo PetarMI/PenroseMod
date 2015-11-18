@@ -48,6 +48,7 @@ data OutputType = Mono_UnminNFA
                 | Comp_NFADot
                 deriving (Read, Show)
 
+-- some function telling more about the output type selected by the user
 outputTypeDoc :: OutputType -> String
 outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
   where
@@ -93,6 +94,13 @@ runner outputType file mbParams = do
             input <- DTIO.readFile file
             ref <- newIORef (fromMaybe [] mbParams)
             let getP = promptForParam ref
+            -- anonymous function that is passed a function 'f' as a parameter
+            -- 'f' comes as the result from the correct case statement
+            -- for the base case 'f' is the result from 'goNFA nfaWB2NFAOutput'
+            -- the function body becomes -> goNFA nfaWB2NFAOutput input getP
+            -- input is the file that is read (nets and wiring)
+            -- getP is the number of nets that is taken as user input. Here it is passed as IO Int
+            -- now go to line 135
             (\f -> f input getP) $ case outputType of
                 Mono_LLNet -> goNet toLLNet
                 Mono_LLNetReadArcs -> goNet toLLNetWithReadArcs
@@ -101,6 +109,9 @@ runner outputType file mbParams = do
                 Mono_LOLANet -> goNet toLOLANet
                 Mono_RawNet -> goRaw toRawNet
                 Mono_UnminNFA -> goRaw toRawNFADot
+                -- this is the case that we go to
+                -- partially apply goNFA with nfaWB2NFAOutput
+                -- nfaWB2NFAOutput is some datatype
                 Comp_NFA -> goNFA nfaWB2NFAOutput
                 Comp_NFASlow -> goNFASlow nfaWB2Dot
                 Comp_NFADot -> goNFA nfaWB2Dot
@@ -121,8 +132,15 @@ runner outputType file mbParams = do
     goNFASlow fmt input getP =
         runWith (findLibraryNFAs libDir) getNFABounds input $
             doOutput NFASlowResult (first fmt) (expr2NFASlow getP)
+    -- function that is called next
+    -- partially apply 'runWith' 
+    -- what does the first argument do?
+    -- second arg is a pair of the boundaries
+    -- third argument is the input file
+    -- TODO see what the last argument is
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
+    -- END IMPORTANT
     goRaw fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
         doOutput RawResult (uncurry fmt) (expr2NWB getP)
 
@@ -133,6 +151,8 @@ runner outputType file mbParams = do
 
     getNFABounds (NFAWithBoundaries _ l r) = (l, r)
 
+    -- called by goNFA
+    -- not sure what outputter does
     runWith getLib getBounds input outputter = do
         lib <- getLib
         let lookupImport name = lib >>= M.lookup name
