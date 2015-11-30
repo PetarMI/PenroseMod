@@ -119,11 +119,12 @@ $(makeLenses ''Counters)
 --        reduced NFA if we match language.
 --     2. (Net, NFA): we only convert Nets once.
 --     3. (NFA, NFA, Op, NFA) only perform the binary operation on NFAs once
- data MemoState = MemoState
+data MemoState = MemoState
     { _counters :: !Counters
     , _knownNFAs :: !(Int, [NFALang])
     , _net2NFA :: !Net2NFAMap
     , _binOpMap :: !NFABinaryMap
+    , _fixedPoint :: !Int
     }
 
 $(makeLenses ''MemoState)
@@ -204,22 +205,6 @@ exprEval onConstant onSeq onTens getP expr = eval expr []
         res2 <- evalToBase expr2 env
         doCompose res1 res2
 
-expr2NWB :: IO Int -> Expr MarkedNet -> IO MarkedNet
-expr2NWB getP expr = do
-    res <- exprEval onNet onSeq onTens getP expr
-    case res of
-        VBase b -> return b
-        other -> error $ "Finished eval with non-nwb result: " ++ show other
-  where
-    onNet = return . snd
-    onSeq mn1 mn2 =
-        let badCompose =
-                error $ "Couldn't compose: " ++ show mn1 ++ " and " ++ show mn2
-            mn = fromMaybe badCompose $ mn1 `Nets.composeMarkedNet` mn2
-        in return $ VBase mn
-    onTens (m1, n1) (m2, n2) =
-        return $ VBase (concatMarkingList m1 m2, Nets.tensor n1 n2)
-
 newtype MaxComp = MaxComp (Integer, (Integer, Integer))
                 deriving Show
 
@@ -250,66 +235,15 @@ instance Show SlowCounters where
 
 type NFASlowEvalM = StateT SlowCounters IO
 
--- Do not perform any memoisation or minimisation optimisation steps. A hacky,
--- copy-paste from expr2NFA, but we don't seriously expect to use this!
-expr2NFASlow :: IO Int -> Expr NFAWithBounds
-             -> IO (NFAWithBounds, SlowCounters)
-expr2NFASlow getP expr = do
-    let initState = SlowCounters 0 0 0 $ MaxComp (0, (0, 0))
-    flip runStateT initState $ do
-        res <- exprEval onNet onSeq onTens (lift getP) expr
-        case res of
-            VBase wh -> return wh
-            other -> error $ "Finished eval with non-NFA result: "
-                                ++ show other
-  where
-    bumper f = f %= succ
-
-    bumpLeafCounter = bumper sleafC
-    bumpSeqCounter = bumper sCompC
-    bumpTensCounter = bumper sTensC
-
-    onNet (shouldInterleave, markedNet) = do
-        let nfa = uncurry (toNFAWithMarking shouldInterleave) markedNet
-        bumpLeafCounter
-        return nfa
-
-    nfaStates :: NFAWithBounds -> Integer
-    nfaStates (NFAWithBoundaries (NFA lts _ _) _ _) =
-        fromIntegral . S.size $ statesLTS lts
-
-    onSeq l r = doRecurse Compose l r $ \x y ->
-        let badCompose =
-                error $ "Couldn't compose: " ++ show x ++ " and " ++ show y
-        in fromMaybe badCompose $ x `NFA.compose` y
-
-    onTens l r = doRecurse Tensor l r NFA.tensor
-
-    doRecurse :: OpType -> NFAWithBounds -> NFAWithBounds
-              -> (NFAWithBounds -> NFAWithBounds -> NFAWithBounds)
-              -> NFASlowEvalM (Value NFASlowEvalM NFAWithBounds)
-    doRecurse op nfa1 nfa2 doCompose = do
-        let bump = case op of
-                          Compose -> bumpSeqCounter
-                          Tensor -> bumpTensCounter
-        bump
-        maxComp <- use sMaxNFAStateSize
-        let nfa1Size = nfaStates nfa1
-            nfa2Size = nfaStates nfa2
-            maxComp' = MaxComp (nfa1Size * nfa2Size, (nfa1Size, nfa2Size))
-        when (maxComp <= maxComp') $
-            sMaxNFAStateSize .= maxComp'
-        return . VBase $ doCompose nfa1 nfa2
-
 -- this is the function that is the entry point for this module
 -- acts as the outputter variable in Run.hs
 expr2NFA :: IO Int -> Expr NFAWithBounds
-         -> IO (NFAWithBounds, (Counters, Sizes))
+         -> IO (NFAWithBounds, (Counters, Sizes, Int))
 expr2NFA getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
             runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty
+        initState = MemoState initCounters nfas M.empty HM.empty 0 
     second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
   where
     initialNumbering = getOrInsert (return ()) (return ()) get modify
@@ -322,8 +256,8 @@ expr2NFA getP expr = do
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
 
-    getCountAndSizes (MemoState count nfas net2nfa binMap) =
-        (count, (M.size net2nfa, fst nfas, HM.size binMap))
+    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints) =
+        (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints)
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
 
@@ -379,9 +313,11 @@ expr2NFA getP expr = do
                                          (knownNFAs %=)
                 -- Reduce the resulting NFA, it can potentially be used many
                 -- times.
+                reducedNfa <- 
                 nfa <- getNFA . reduceNFA $
                     doCompose (toRawNFA nfa1) (toRawNFA nfa2)
                 -- Insert the opTriple into the map
+                fixedPoint %= (+ 1)
                 binOpMap %= (HM.insert opTriple nfa)
                 return $ VBase nfa
 
@@ -393,9 +329,6 @@ expr2NFA getP expr = do
                 -> (((Int, [NFALang]) -> (Int, [NFALang])) -> m ())
                 -> NFAWithBounds -> m NFALang
     getOrInsert onKnown onUnknown getFrom update nfa = do
-        let langEquiv (NFAWithBoundaries nfa1 l1 r1)
-                      (NFAWithBoundaries nfa2 l2 r2) = l1 == l2 && r1 == r2 &&
-                        equivalenceHKC nfa1 nfa2
         mbExisting <-
             listToMaybe . filter (langEquiv nfa . toRawNFA) . snd <$> getFrom
         case mbExisting of
@@ -410,3 +343,78 @@ expr2NFA getP expr = do
     reduceNFA :: NFAWithBounds -> NFAWithBounds
     reduceNFA =
         reflexivelyCloseNFA . modifyNFAWB (minimise 8 . epsilonCloseNFA)
+    
+    langEquiv :: NFAWithBounds -> NFAWithBounds -> Bool
+    langEquiv (NFAWithBoundaries nfa1 l1 r1) 
+              (NFAWithBoundaries nfa2 l2 r2) = l1 == l2 && r1 == r2 &&
+                            equivalenceHKC nfa1 nfa2
+
+    -- check if we have a fixed point 
+    --fixedPointReached :: NFAWithBounds -> NFAWithBounds -> NFAWithBounds -> Bool
+
+-- Do not perform any memoisation or minimisation optimisation steps. A hacky,
+-- copy-paste from expr2NFA, but we don't seriously expect to use this!
+expr2NFASlow :: IO Int -> Expr NFAWithBounds
+             -> IO (NFAWithBounds, SlowCounters)
+expr2NFASlow getP expr = do
+    let initState = SlowCounters 0 0 0 $ MaxComp (0, (0, 0))
+    flip runStateT initState $ do
+        res <- exprEval onNet onSeq onTens (lift getP) expr
+        case res of
+            VBase wh -> return wh
+            other -> error $ "Finished eval with non-NFA result: "
+                                ++ show other
+  where
+    bumper f = f %= succ
+
+    bumpLeafCounter = bumper sleafC
+    bumpSeqCounter = bumper sCompC
+    bumpTensCounter = bumper sTensC
+
+    onNet (shouldInterleave, markedNet) = do
+        let nfa = uncurry (toNFAWithMarking shouldInterleave) markedNet
+        bumpLeafCounter
+        return nfa
+
+    nfaStates :: NFAWithBounds -> Integer
+    nfaStates (NFAWithBoundaries (NFA lts _ _) _ _) =
+        fromIntegral . S.size $ statesLTS lts
+
+    onSeq l r = doRecurse Compose l r $ \x y ->
+        let badCompose =
+                error $ "Couldn't compose: " ++ show x ++ " and " ++ show y
+        in fromMaybe badCompose $ x `NFA.compose` y
+
+    onTens l r = doRecurse Tensor l r NFA.tensor
+
+    doRecurse :: OpType -> NFAWithBounds -> NFAWithBounds
+              -> (NFAWithBounds -> NFAWithBounds -> NFAWithBounds)
+              -> NFASlowEvalM (Value NFASlowEvalM NFAWithBounds)
+    doRecurse op nfa1 nfa2 doCompose = do
+        let bump = case op of
+                          Compose -> bumpSeqCounter
+                          Tensor -> bumpTensCounter
+        bump
+        maxComp <- use sMaxNFAStateSize
+        let nfa1Size = nfaStates nfa1
+            nfa2Size = nfaStates nfa2
+            maxComp' = MaxComp (nfa1Size * nfa2Size, (nfa1Size, nfa2Size))
+        when (maxComp <= maxComp') $
+            sMaxNFAStateSize .= maxComp'
+        return . VBase $ doCompose nfa1 nfa2
+
+expr2NWB :: IO Int -> Expr MarkedNet -> IO MarkedNet
+expr2NWB getP expr = do
+    res <- exprEval onNet onSeq onTens getP expr
+    case res of
+        VBase b -> return b
+        other -> error $ "Finished eval with non-nwb result: " ++ show other
+  where
+    onNet = return . snd
+    onSeq mn1 mn2 =
+        let badCompose =
+                error $ "Couldn't compose: " ++ show mn1 ++ " and " ++ show mn2
+            mn = fromMaybe badCompose $ mn1 `Nets.composeMarkedNet` mn2
+        in return $ VBase mn
+    onTens (m1, n1) (m2, n2) =
+        return $ VBase (concatMarkingList m1 m2, Nets.tensor n1 n2)

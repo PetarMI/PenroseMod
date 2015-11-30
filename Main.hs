@@ -27,7 +27,7 @@ main = do
         (output : file : rest) -> do
             outputType <- parseOutputType output
             -- Entry Point of execution
-            -- See what 'go' 'as' and 'q' are 
+            -- See what 'go' 'as' are 
             -- calls the correct runner is src/Run.hs
             let go as q = runner outputType file as >>= printRes q
             -- check if the user has passed any of the optional parameters 
@@ -69,6 +69,7 @@ main = do
                                , ( Counters (StrictTriple net2nfa nfa neither)
                                             (StrictQuad compYes compNo tenYes tenNo)
                                  , (net2nfas, nfas, binops)
+                                 , fixedPoint
                                  )
                                )
                    , time
@@ -98,6 +99,8 @@ main = do
                                , indent $ show net2nfas ++ " recorded net2NFA,"
                                , indent $ show nfas ++ " unique language NFAs,"
                                , indent $ show binops ++ " Binary op triples."
+                               , "Fixed point"
+                               , indent $ show fixedPoint
                                ]
     printRes quiet ( NFASlowResult
                          ( res

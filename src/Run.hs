@@ -73,7 +73,7 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
     compStr = "Compositional: traverse wiring decomposition, converting to "
               ++ "output,\nexploiting memoisation and language-equivalence."
 
-data RunResult = NFAResult (String, (Counters, Sizes))
+data RunResult = NFAResult (String, (Counters, Sizes, Int))
                | NFASlowResult (String, SlowCounters)
                | NWBResult String
                | RawResult String
@@ -137,13 +137,13 @@ runner outputType file mbParams = do
     -- what does the first argument do?
     -- second arg is a pair of the boundaries
     -- third argument is the input file
-    -- TODO see what the last argument is
+    -- How do we get expr2NFA from doOutput
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
-    -- END IMPORTANT
     goRaw fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
         doOutput RawResult (uncurry fmt) (expr2NWB getP)
 
+    -- What does it do
     doOutput toRes format convert =
         timeIO . ((toRes . format) <$>) . convert
 
