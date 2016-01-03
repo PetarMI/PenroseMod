@@ -44,7 +44,7 @@ data OutputType = Mono_UnminNFA
                 | Mono_LLNetDot
                 | Mono_LOLANet
                 | Comp_NFA
-                | Comp_NFASlow
+                | Comp_NFA_FP   -- The new mode in which Penrose will run
                 | Comp_NFADot
                 deriving (Read, Show)
 
@@ -64,8 +64,8 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
         Mono_LOLANet -> (monoStr, "Composite net, LOLA format")
         Comp_NFA -> (compStr, "NFA format, used to import pre-computed NFAs "
                               ++ "for commonly used components")
-        Comp_NFASlow -> (compStr, "DOT format representation of resulting "
-                                 ++ "(reduced) NFA, using naive (slow) algorithm")
+        Comp_NFA_FP -> (compStr, "NFA format, used to import pre-computed NFAs "
+                              ++ "using Fixed-point checking for reachability")
         Comp_NFADot -> (compStr, "DOT format representation of resulting "
                                  ++ "(reduced) NFA")
     monoStr = "Monolithic: flatten wiring decomposition to composite "
@@ -74,14 +74,14 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
               ++ "output,\nexploiting memoisation and language-equivalence."
 
 data RunResult = NFAResult (String, (Counters, Sizes, Int))
-               | NFASlowResult (String, SlowCounters)
+               | NFAResultWFP (String, (Counters, Sizes, Int))
                | NWBResult String
                | RawResult String
                deriving Show
 
 instance NFData RunResult where
     rnf (NFAResult x) = rnf x
-    rnf (NFASlowResult x) = rnf x
+    rnf (NFAResultWFP x) = rnf x
     rnf (NWBResult x) = rnf x
     rnf (RawResult x) = rnf x
 
@@ -113,7 +113,7 @@ runner outputType file mbParams = do
                 -- partially apply goNFA with nfaWB2NFAOutput
                 -- nfaWB2NFAOutput is some datatype
                 Comp_NFA -> goNFA nfaWB2NFAOutput
-                Comp_NFASlow -> goNFASlow nfaWB2Dot
+                Comp_NFA_FP -> goNFA_FP nfaWB2NFAOutput
                 Comp_NFADot -> goNFA nfaWB2Dot
   where
     libDir = takeDirectory file </> "lib"
@@ -129,21 +129,25 @@ runner outputType file mbParams = do
 
     goNet fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
         doOutput NWBResult (uncurry fmt) (expr2NWB getP)
-    goNFASlow fmt input getP =
-        runWith (findLibraryNFAs libDir) getNFABounds input $
-            doOutput NFASlowResult (first fmt) (expr2NFASlow getP)
     -- function that is called next
     -- partially apply 'runWith' 
-    -- what does the first argument do?
+    -- fmt is what to do with the result 
     -- second arg is a pair of the boundaries
     -- third argument is the input file
     -- How do we get expr2NFA from doOutput
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
+    -- goNFA copy that works with fixed points. It doesnt need runWith for now as it doesnt parse anything
+    -- fmt tells us how to format what the main eval function (expr2NFAWFP) returns
+    -- input is the file that we do not right now (we are hardcoding the buffer)
+    -- getP is the Int that the user passes
+    -- goNFA_FP fmt input getP = doOutput NFAResult_WFP (first fmt) (expr2NFAWFP getP)
+    goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
+        doOutput NFAResultWFP (first fmt) (expr2NFAWFP getP)
     goRaw fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
         doOutput RawResult (uncurry fmt) (expr2NWB getP)
 
-    -- What does it do
+    -- What we return after we get the result
     doOutput toRes format convert =
         timeIO . ((toRes . format) <$>) . convert
 

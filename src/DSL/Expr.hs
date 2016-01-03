@@ -100,6 +100,11 @@ instance (Show p) => Show (Value m p) where
     show (VBase b) = "VBase " ++ show b
     show (VInt i) = "VInt " ++ show i
 
+instance (Eq p) => Eq (Value m p) where
+    (VBase b1) == (VBase b2) = b1 == b2
+    (VInt i) == (VInt n) = i == n
+    _ == _ = False
+
 data TypeConstraint = TCEquality Type Type
 
 data TypeCheckError = IncompatableTypes Type Type

@@ -16,7 +16,7 @@ import Text.Printf ( printf )
 import Run ( runner, OutputType, RunResult(..), outputTypeDoc )
 import Util ( dieWith, indentLines )
 import ProcessExpr ( Counters(..), StrictTriple(..), StrictQuad(..)
-                   , SlowCounters(..), MaxComp(..) )
+                   , MaxComp(..) )
 
 main :: IO ()
 main = do
@@ -102,10 +102,14 @@ main = do
                                , "Fixed point"
                                , indent $ show fixedPoint
                                ]
-    printRes quiet ( NFASlowResult
-                         ( res
-                         , SlowCounters leaves seqs tens (MaxComp (_, sizes))
-                         )
+
+    printRes quiet ( NFAResultWFP ( res
+                               , ( Counters (StrictTriple net2nfa nfa neither)
+                                            (StrictQuad compYes compNo tenYes tenNo)
+                                 , (net2nfas, nfas, binops)
+                                 , fixedPoint
+                                 )
+                               )
                    , time
                    ) = do
         putStrLn res
@@ -115,14 +119,27 @@ main = do
                                , indent $ printf "%3fs" time
                                , ""
                                , "Counters:"
-                               , indent $ show leaves ++ " leaf conversions,"
-                               , indent $ show seqs
-                                            ++ " sequential 2-NFA compositions,"
-                               , indent $ show tens
-                                            ++ " tensor 2-NFA compositions,"
-                               , indent $ "Max (intermediate) 2-NFA composition state counts: "
-                                            ++ show sizes
-                               ]
+                               , indent $ show net2nfa ++ " net2NFA hits,"
+                               , indent $
+                                     show nfa ++ " language equivalent known NFAs,"
+                               , indent $ show neither ++ " unknown Net/NFAs."
+                               , ""
+                               , indent $
+                                    show (compYes, tenYes)
+                                    ++ " known (;/*) op & args ("
+                                    ++ show (compYes + tenYes) ++ " total),"
+                               , indent $
+                                    show (compNo, tenNo)
+                                    ++ " unknown (;/*) op & args ("
+                                    ++ show (compNo + tenNo) ++ " total)."
+                               , ""
+                               , "Cache:"
+                               , indent $ show net2nfas ++ " recorded net2NFA,"
+                               , indent $ show nfas ++ " unique language NFAs,"
+                               , indent $ show binops ++ " Binary op triples."
+                               , "Fixed point"
+                               , indent $ show fixedPoint
+                               ]                             
 
 outputTypes :: String
 outputTypes = $(do
