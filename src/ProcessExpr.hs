@@ -125,7 +125,7 @@ data MemoState = MemoState
     , _knownNFAs :: !(Int, [NFALang])
     , _net2NFA :: !Net2NFAMap
     , _binOpMap :: !NFABinaryMap
-    , _fixedPoint :: !Int
+    , _fixedPoint :: !Bool
     }
 
 $(makeLenses ''MemoState)
@@ -140,12 +140,14 @@ exprEval :: forall r m . (Functor m, Monad m, Eq r)
          -> (r -> r -> m (Value m r))
          -- A function to handle the tensor composition of two `r`s to produce a (monad-action producing a) value
          -> (r -> r -> m (Value m r))
+         -- Function to set the fixed point status
+         -> (m ())
          -- A monadic "action" that'll produce an int (probably easiest to ignore this for now)
          -> (m Int)
          -- The expression we're evaluating 
          -- return a monad action (where the monad is `m`) that produces the "value" that is the result of the evaluation
          -> Expr r -> m (Value m r)
-exprEval onConstant onSeq onTens getP expr = eval expr []
+exprEval onConstant onSeq onTens onFP getP expr = eval expr []
   where
     evalToBase e env = do
         res <- eval e env
@@ -214,7 +216,9 @@ exprEval onConstant onSeq onTens getP expr = eval expr []
                             True -> do
                                 app <- eval (EApp f (EPreComputed resExpr)) env
                                 if app == res then return (False, app) else return (True, app)
-                            False -> return resPair
+                            False -> do
+                                onFP
+                                return resPair
                 | otherwise -> error "Detected negative intcase argument!"
 
     --foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
@@ -262,18 +266,18 @@ instance NFData MaxComp where
 -- function that is identical to the original
 -- but wanted to hardcode the buffer example
 expr2NFAWFP :: IO Int -> Expr NFAWithBounds
-         -> IO (NFAWithBounds, (Counters, Sizes, Int))
+         -> IO (NFAWithBounds, (Counters, Sizes, Bool))
 expr2NFAWFP getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
             runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty 0 
+        initState = MemoState initCounters nfas M.empty HM.empty False 
     second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
   where
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
     doEval numberedExpr = do
-        res <- exprEval onNet onSeq onTens (lift getP) numberedExpr
+        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
@@ -296,6 +300,7 @@ expr2NFAWFP getP expr = do
     unknownCompose = bumpOpCounter sq2
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
+    onFixedPoint = fixedPoint .= True
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -373,18 +378,18 @@ expr2NFAWFP getP expr = do
 -- this is the function that is the entry point for this module
 -- acts as the outputter variable in Run.hs
 expr2NFA :: IO Int -> Expr NFAWithBounds
-         -> IO (NFAWithBounds, (Counters, Sizes, Int))
+         -> IO (NFAWithBounds, (Counters, Sizes, Bool))
 expr2NFA getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
             runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty 0 
+        initState = MemoState initCounters nfas M.empty HM.empty False 
     second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
   where
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
     doEval numberedExpr = do
-        res <- exprEval onNet onSeq onTens (lift getP) numberedExpr
+        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
@@ -407,6 +412,7 @@ expr2NFA getP expr = do
     unknownCompose = bumpOpCounter sq2
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
+    onFixedPoint = fixedPoint .= True
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -442,7 +448,8 @@ expr2NFA getP expr = do
         case mbRes of
             -- if we already have that composition then we just return the value from the map
             Just nfa -> do
-                fixedPoint %= (+ 1)
+                --fixedPoint %= (+ 1)
+                onFixedPoint
                 known >> return (VBase nfa)
             Nothing -> do
                 unknown
@@ -484,21 +491,4 @@ expr2NFA getP expr = do
               (NFAWithBoundaries nfa2 l2 r2) = l1 == l2 && r1 == r2 &&
                             equivalenceHKC nfa1 nfa2
 
-    -- check if we have a fixed point 
-    --fixedPointReached :: NFAWithBounds -> NFAWithBounds -> NFAWithBounds -> Bool
 
-expr2NWB :: IO Int -> Expr MarkedNet -> IO MarkedNet
-expr2NWB getP expr = do
-    res <- exprEval onNet onSeq onTens getP expr
-    case res of
-        VBase b -> return b
-        other -> error $ "Finished eval with non-nwb result: " ++ show other
-  where
-    onNet = return . snd
-    onSeq mn1 mn2 =
-        let badCompose =
-                error $ "Couldn't compose: " ++ show mn1 ++ " and " ++ show mn2
-            mn = fromMaybe badCompose $ mn1 `Nets.composeMarkedNet` mn2
-        in return $ VBase mn
-    onTens (m1, n1) (m2, n2) =
-        return $ VBase (concatMarkingList m1 m2, Nets.tensor n1 n2)

@@ -36,14 +36,7 @@ import Util ( timeIO, failError, (.:), pretty )
 import ProcessExpr
 
 -- TODO: we should really separate the output type from the computation type
-data OutputType = Mono_UnminNFA
-                | Mono_RawNet
-                | Mono_PNML
-                | Mono_LLNet
-                | Mono_LLNetReadArcs
-                | Mono_LLNetDot
-                | Mono_LOLANet
-                | Comp_NFA
+data OutputType = Comp_NFA
                 | Comp_NFA_FP   -- The new mode in which Penrose will run
                 | Comp_NFADot
                 deriving (Read, Show)
@@ -53,28 +46,17 @@ outputTypeDoc :: OutputType -> String
 outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
   where
     (header, detail) = case outType of
-        Mono_UnminNFA -> (monoStr, "Reachability graph, unminimised")
-        Mono_RawNet -> (monoStr, "Composite net, internal format")
-        Mono_PNML -> (monoStr, "Composite net, PNML format")
-        Mono_LLNet -> (monoStr, "Composite net, ll_net format")
-        Mono_LLNetReadArcs ->
-            (monoStr, "Composite net, cunf ll_net format with read arcs")
-        Mono_LLNetDot ->
-            (monoStr, "Composite net, DOT format, showing structure")
-        Mono_LOLANet -> (monoStr, "Composite net, LOLA format")
         Comp_NFA -> (compStr, "NFA format, used to import pre-computed NFAs "
                               ++ "for commonly used components")
         Comp_NFA_FP -> (compStr, "NFA format, used to import pre-computed NFAs "
                               ++ "using Fixed-point checking for reachability")
         Comp_NFADot -> (compStr, "DOT format representation of resulting "
                                  ++ "(reduced) NFA")
-    monoStr = "Monolithic: flatten wiring decomposition to composite "
-              ++ "net, before output."
     compStr = "Compositional: traverse wiring decomposition, converting to "
               ++ "output,\nexploiting memoisation and language-equivalence."
 
-data RunResult = NFAResult (String, (Counters, Sizes, Int))
-               | NFAResultWFP (String, (Counters, Sizes, Int))
+data RunResult = NFAResult (String, (Counters, Sizes, Bool))
+               | NFAResultWFP (String, (Counters, Sizes, Bool))
                | NWBResult String
                | RawResult String
                deriving Show
@@ -102,13 +84,6 @@ runner outputType file mbParams = do
             -- getP is the number of nets that is taken as user input. Here it is passed as IO Int
             -- now go to line 135
             (\f -> f input getP) $ case outputType of
-                Mono_LLNet -> goNet toLLNet
-                Mono_LLNetReadArcs -> goNet toLLNetWithReadArcs
-                Mono_PNML -> goNet toPNML
-                Mono_LLNetDot -> goNet toLLDot
-                Mono_LOLANet -> goNet toLOLANet
-                Mono_RawNet -> goRaw toRawNet
-                Mono_UnminNFA -> goRaw toRawNFADot
                 -- this is the case that we go to
                 -- partially apply goNFA with nfaWB2NFAOutput
                 -- nfaWB2NFAOutput is some datatype
@@ -118,17 +93,6 @@ runner outputType file mbParams = do
   where
     libDir = takeDirectory file </> "lib"
 
-    toPNML marking = llNet2PNML marking . net2LLNet
-    toLLNet marking = unparseLLNet marking . net2LLNet
-    toLLNetWithReadArcs marking =
-        unparseLLNetWithReadArcs marking . net2LLNetWithReadArcs
-    toLLDot marking = llNet2Dot marking . net2LLNet
-    toLOLANet marking = unparseLOLANet marking . net2LOLANet
-    toRawNet m = (++ "\nWanted Marking: " ++ pretty m) . pretty
-    toRawNFADot = nfaWB2Dot .: toNFAWithMarking False
-
-    goNet fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
-        doOutput NWBResult (uncurry fmt) (expr2NWB getP)
     -- function that is called next
     -- partially apply 'runWith' 
     -- fmt is what to do with the result 
@@ -144,8 +108,6 @@ runner outputType file mbParams = do
     -- goNFA_FP fmt input getP = doOutput NFAResult_WFP (first fmt) (expr2NFAWFP getP)
     goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResultWFP (first fmt) (expr2NFAWFP getP)
-    goRaw fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
-        doOutput RawResult (uncurry fmt) (expr2NWB getP)
 
     -- What we return after we get the result
     doOutput toRes format convert =
