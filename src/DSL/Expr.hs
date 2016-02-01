@@ -39,7 +39,9 @@ data SugarExpr p = SEVar VarId
                  | SENum Int
                  | SERead
                  | SEIntCase (SugarExpr p) (SugarExpr p) (SugarExpr p)
+                 | SEStarCase (SugarExpr p) (SugarExpr p) (SugarExpr p)
                  | SENSequence (SugarExpr p) (SugarExpr p)
+                 | SEkstar (SugarExpr p)
                  | SEBin BinOp (SugarExpr p) (SugarExpr p)
                  | SEConstant InterleavingMarkedNet
                  | SEPreComputed p
@@ -55,6 +57,7 @@ data Expr p = EVar VarId
             | ENum Int
             | ERead
             | EIntCase (Expr p) (Expr p) (Expr p)
+            | EStarCase (Expr p) (Expr p) (Expr p)
             | EBin BinOp (Expr p) (Expr p)
             | EConstant InterleavingMarkedNet
             | EPreComputed p
@@ -77,7 +80,9 @@ data RawExpr = RVar VarId
              | RNum Int
              | RRead
              | RIntCase RawExpr RawExpr RawExpr
+             | RStarCase RawExpr RawExpr RawExpr
              | RNSequence RawExpr RawExpr
+             | RKStar RawExpr
              | RBin BinOp RawExpr RawExpr
              | RName String
              | RApp RawExpr RawExpr
@@ -178,6 +183,13 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             (succCase', sTy) <- checkType' succCase
             checkTypeConstraint $ TCEquality sTy (zTy :-> zTy)
             return (EIntCase i' zeroCase' succCase', zTy)
+        (SEStarCase i zeroCase succCase) -> do
+            (i', iTy) <- checkType' i
+            when (iTy /= TyInt) $ die $ NotInt iTy
+            (zeroCase', zTy) <- checkType' zeroCase
+            (succCase', sTy) <- checkType' succCase
+            checkTypeConstraint $ TCEquality sTy (zTy :-> zTy)
+            return (EStarCase i' zeroCase' succCase', zTy)
         (SENSequence num net) -> do
             (_, netTy) <- checkType' net
             let varExpr = SEVar . VarId
@@ -199,6 +211,29 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
                                      ++ show dsExprType ++ " /= "
                                      ++ show netTy
                         else return (dsExpr', netTy)
+                _ -> die $ InvalidSeqType netTy
+        (SEkstar net) -> do
+            (netExpr, netTy) <- checkType' net
+            {--let sugExpr = SEStarCase (SERead)
+                                     net
+                                     (SELam netTy <-body->)--}
+            let varExpr = SEVar . VarId
+                dsExpr = SEBind (offsetVarsBy 1 net) $
+                               SEStarCase (SEBin Sub (varExpr 1) (SENum 1))
+                                         (varExpr 0)
+                                         (SELam netTy (SESeq (varExpr 0)
+                                                             (varExpr 1)))
+
+            case netTy of
+                TyArr x y 
+                    | x == y -> do
+                        -- desugaring of SEkstar to EStarCase
+                        (dsExpr', dsExprType) <- checkType' dsExpr
+                        if dsExprType /= netTy
+                            then error $ "dsExprType is not netTy: "
+                                         ++ show dsExprType ++ " /= "
+                                         ++ show netTy
+                            else return (dsExpr', netTy)
                 _ -> die $ InvalidSeqType netTy
         (SELam argTy body) -> do
             (body', bodyTy) <- local (addTypeBindingToContext argTy) $ checkType' body

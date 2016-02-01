@@ -128,7 +128,10 @@ lookupNames getImport
     processRawExpr (RName s) = doLookup s
     processRawExpr (RIntCase e1 e2 e3) =
         processRawExpr e1 >>= (\x -> processBin (SEIntCase x) e2 e3)
+    processRawExpr (RStarCase e1 e2 e3) = 
+        processRawExpr e1 >>= (\x -> processBin (SEStarCase x) e2 e3)
     processRawExpr (RNSequence e1 e2) = processBin SENSequence e1 e2
+    processRawExpr (RKStar e1) = processUn SEkstar e1
     processRawExpr (RBin op e1 e2) = processBin (SEBin op) e1 e2
     processRawExpr (RApp e1 e2) = processBin SEApp e1 e2
     processRawExpr (RLam ty e1) = SELam ty <$> processRawExpr e1
@@ -136,6 +139,7 @@ lookupNames getImport
     processRawExpr (RSeq e1 e2) = processBin SESeq e1 e2
     processRawExpr (RTen e1 e2) = processBin SETen e1 e2
 
+    processUn f e1 = f <$> processRawExpr e1
     processBin f e1 e2 = f <$> processRawExpr e1 <*> processRawExpr e2
 
     doLookup name = do

@@ -33,9 +33,11 @@ tokens :-
     λ | \\                { const TokLambda }
     \.                    { const TokDotSep }
     n_sequence            { const TokSequence }
+    \*\*                  { const TokKStar }
     0                     { const (TokNum 0) }
     $nonzerodigit $digit* { TokNum . read . unpack }
     intcase               { const TokIntCase }
+    starcase              { const TokStarCase }
     \+                    { const TokPlus }
     \-                    { const TokMinus }
     \(                    { const TokLPar }
@@ -56,10 +58,12 @@ data LexerTok = TokTens
               | TokLambda
               | TokDotSep
               | TokSequence
+              | TokKStar
               | TokLPar
               | TokRPar
               | TokNum Int
               | TokIntCase
+              | TokStarCase
               | TokPlus
               | TokMinus
               | TokName String

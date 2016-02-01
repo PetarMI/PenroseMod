@@ -176,6 +176,9 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
     eval (EIntCase i z s) env = do
         resPair <- foldWFP i z s env
         return (snd resPair)
+    eval (EStarCase i z s) env = do
+        resPair <- foldWFP i z s env
+        return (snd resPair)
     eval (EPreComputed pc) _ = return (VBase pc)
     eval (EConstant constant) _ = VBase <$> onConstant constant
     eval (ESeq t1 t2) env = doRecurse t1 t2 env onSeq

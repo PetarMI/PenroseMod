@@ -42,8 +42,10 @@ import qualified Data.Text as T
   '+'        { TokPlus }
   '-'        { TokMinus }
   intcase    { TokIntCase }
+  starcase   { TokStarCase }
   inttype    { TokIntType }
   n_sequence { TokSequence }
+  '*'        { TokKStar }
   tens       { TokTens }
   seq        { TokSeq }
 
@@ -62,10 +64,12 @@ EXPR : bind name '=' EXPR in EXPR { createBind $2 $4 $6 }
      | lam name ':' TYPE '.' EXPR { createLam $2 $4 $6 }
      | EXPR1                      { $1 }
 
-EXPR1 : EXPR1 seq EXPR1           { liftM2 RSeq $1 $3 }
-      | EXPR1 tens EXPR1          { liftM2 RTen $1 $3 }
-      | n_sequence EXPR3 EXPR3    { liftM2 RNSequence $2 $3 }
-      | intcase EXPR3 EXPR3 EXPR3 { liftM3 RIntCase $2 $3 $4 }
+EXPR1 : EXPR1 seq EXPR1             { liftM2 RSeq $1 $3 }
+      | EXPR1 tens EXPR1            { liftM2 RTen $1 $3 }
+      | n_sequence EXPR3 EXPR3      { liftM2 RNSequence $2 $3 }
+      | EXPR3 '*'                   { liftM RKStar $1 }
+      | intcase EXPR3 EXPR3 EXPR3   { liftM3 RIntCase $2 $3 $4 }
+      | starcase EXPR3 EXPR3 EXPR3  { liftM3 RStarCase $2 $3 $4 }
       | EXPR2                     { $1 }
 
 EXPR2 : EXPR2 EXPR3 { liftM2 RApp $1 $2 }

@@ -164,6 +164,7 @@ parseWiringDef = WiringDefinition <$> option [] parseImport
   where
     -- Integrate our Happy parser to parse the expression
     parseExpr = do
+      -- what is this input here???
         input <- getInput
         case parseRawExpr input of
             Left err -> parserFail err

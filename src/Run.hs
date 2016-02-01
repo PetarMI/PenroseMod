@@ -101,7 +101,6 @@ runner outputType file mbParams = do
     -- How do we get expr2NFA from doOutput
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
-    -- goNFA copy that works with fixed points. It doesnt need runWith for now as it doesnt parse anything
     -- fmt tells us how to format what the main eval function (expr2NFAWFP) returns
     -- input is the file that we do not right now (we are hardcoding the buffer)
     -- getP is the Int that the user passes
@@ -122,15 +121,19 @@ runner outputType file mbParams = do
     runWith getLib getBounds input outputter = do
         lib <- getLib
         let lookupImport name = lib >>= M.lookup name
+            -- parse the input
             compAndWiring = parseComponentsAndWiring input
+            -- sugar parsing among other stuff 
             renamed = compAndWiring >>= lookupNames lookupImport
         case renamed of
             Left err -> failError $ "couldn't parse: " ++ err
             Right (expr, _) -> do
+                -- do typechecking
                 let exprType = checkType getBounds expr
                 case exprType of
                     Left err -> failError $ "Couldn't typecheck: "
                                                 ++ show err
+                    -- interpret and execute
                     Right (expr', TyArr _ _) -> outputter expr'
                     Right ty -> failError $
                         "Top-level expr must be base type, got: "++ show ty
