@@ -6,7 +6,7 @@ import Control.Arrow ( second, (***) )
 import Control.Applicative ( (<$>) )
 import Control.DeepSeq ( NFData(..) )
 import Control.Lens ( makeLenses, (%=), use, (.=) )
-import Control.Monad ( when )
+import Control.Monad ( when, liftM )
 import Control.Monad.Trans ( lift )
 import Control.Monad.Trans.State.Strict ( StateT, runStateT, modify
                                         , get, runState )
@@ -133,7 +133,7 @@ $(makeLenses ''MemoState)
 type Sizes = (Int, Int, Int)
 type NFAEvalM = StateT MemoState IO
 
-exprEval :: forall r m . (Functor m, Monad m, Eq r)
+exprEval :: forall r m . (Monad m, Eq r)
          -- A function that'll turn nets into an "r" (whatever r ends up being)
          => (InterleavingMarkedNet -> m r)
          -- A function to handle the sequential composition of two `r`s to produce a (monad-action producing a) value
@@ -165,7 +165,7 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
     eval :: Expr r -> [Value m r] -> m (Value m r)
     -- Handle the Net cases
     eval (ENum n) _ = return (VInt n)
-    eval ERead _ = VInt <$> getP
+    eval ERead _ = liftM VInt getP
     eval (EBin op x y) env = do
         let f = case op of
                     Add -> (+)
@@ -180,7 +180,7 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
         resPair <- foldWFP i z s env
         return (snd resPair)
     eval (EPreComputed pc) _ = return (VBase pc)
-    eval (EConstant constant) _ = VBase <$> onConstant constant
+    eval (EConstant constant) _ = liftM VBase $ onConstant constant
     eval (ESeq t1 t2) env = doRecurse t1 t2 env onSeq
     eval (ETen t1 t2) env = doRecurse t1 t2 env onTens
     -- Handle the ML-like cases

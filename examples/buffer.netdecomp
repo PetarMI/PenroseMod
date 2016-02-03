@@ -19,4 +19,4 @@ TRANS
     , {out,full>,>empty}
     }
 WIRING
-leftend ; starcase read rightend (\x : Net 1 0 . opb ; x)
+leftend ; intcase read rightend (\x : Net 1 0 . opb ; x)

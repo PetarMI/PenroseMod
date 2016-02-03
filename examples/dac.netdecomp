@@ -39,4 +39,4 @@ TRANS { {init>, forkChild, >forked}
       }
 
 WIRING
-controller ; n_sequence read worker ; terminator
+controller ; worker ** ; terminator
