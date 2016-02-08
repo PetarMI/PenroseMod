@@ -5,6 +5,8 @@ import Data.List ( intercalate )
 import System.CPUTime ( getCPUTime )
 import System.Exit ( exitFailure )
 import System.IO ( hPutStrLn, stderr )
+import Data.IORef ( IORef, readIORef, writeIORef )
+import Safe ( readMay )
 import Prelude hiding ( unlines )
 
 timeIO :: (NFData a) => IO a -> IO (a, Double)
@@ -34,3 +36,18 @@ class (Show a) => Pretty a where
 
 indentLines :: [String] -> String
 indentLines = unlines . map (replicate 4 ' ' ++)
+
+promptForParam :: IORef [Int] -> IO Int
+promptForParam ref = do
+    is <- readIORef ref
+    case is of
+        [] -> getInt
+        (x:xs) -> writeIORef ref xs >> return x
+  where
+    getInt :: IO Int
+    getInt = do
+        putStrLn "Enter a number for PARAM"
+        line <- getLine
+        case readMay line of
+            Just x -> return x
+            Nothing -> putStrLn "Invalid number, try again!" >> getInt

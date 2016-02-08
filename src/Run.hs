@@ -7,7 +7,7 @@ import Control.DeepSeq ( NFData(..) )
 import Control.Monad ( filterM )
 import Control.Monad.Trans ( lift )
 import Control.Monad.Trans.Maybe ( MaybeT, runMaybeT )
-import Data.IORef ( newIORef, IORef, readIORef, writeIORef )
+import Data.IORef ( newIORef )
 import Data.Map.Strict ( Map )
 import qualified Data.Map as M ( fromList, lookup )
 import Data.Maybe ( fromMaybe )
@@ -32,7 +32,7 @@ import PEPReadArcs ( unparseLLNetWithReadArcs )
 import PEP ( unparseLLNet, llNet2Dot, llNet2PNML )
 import NFA ( nfaWB2Dot, nfaWB2NFAOutput, NFAWithBoundaries(..)
            , toNFAWithMarking )
-import Util ( timeIO, failError, (.:), pretty )
+import Util ( promptForParam, timeIO, failError, (.:), pretty )
 import ProcessExpr
 
 -- TODO: we should really separate the output type from the computation type
@@ -168,18 +168,4 @@ getLibraryContents dir = do
             contents <- map (dir </>) <$> getDirectoryContents dir
             filterM ((isRegularFile <$>) . getFileStatus) contents
 
-promptForParam :: IORef [Int] -> IO Int
-promptForParam ref = do
-    is <- readIORef ref
-    case is of
-        [] -> getInt
-        (x:xs) -> writeIORef ref xs >> return x
-  where
-    getInt :: IO Int
-    getInt = do
-        putStrLn "Enter a number for PARAM"
-        line <- getLine
-        case readMay line of
-            Just x -> return x
-            Nothing -> putStrLn "Invalid number, try again!" >> getInt
 

@@ -11,7 +11,6 @@ import Control.Monad.Trans ( lift )
 import Control.Monad.Trans.State.Strict ( StateT, runStateT, modify
                                         , get, runState )
 import Data.Hashable ( Hashable(..) )
-import Data.Either
 import Data.HashMap.Strict ( HashMap )
 import qualified Data.HashMap.Strict as HM
 import Data.Maybe ( fromMaybe, listToMaybe )
@@ -29,6 +28,9 @@ import NFA ( NFAWithBoundaries(..), tensor, modifyNFAWB, compose
            , toNFAWithMarking, equivalenceHKC, epsilonCloseNFA, NFA(..)
            , reflexivelyCloseNFA )
 import Nets ( composeMarkedNet, tensor, MarkedNet )
+import Util ( promptForParam )
+import Data.IORef ( newIORef )
+import Debug.Trace
 
 data WithId a = WithId a Int
 
@@ -126,6 +128,7 @@ data MemoState = MemoState
     , _net2NFA :: !Net2NFAMap
     , _binOpMap :: !NFABinaryMap
     , _fixedPoint :: !Bool
+    , _fpcounter :: !(Maybe Int)
     }
 
 $(makeLenses ''MemoState)
@@ -142,12 +145,14 @@ exprEval :: forall r m . (Monad m, Eq r)
          -> (r -> r -> m (Value m r))
          -- Function to set the fixed point status
          -> (m ())
+         -- Function to set the parameter status
+         -> (Int -> m ())
          -- A monadic "action" that'll produce an int (probably easiest to ignore this for now)
          -> (m Int)
          -- The expression we're evaluating 
          -- return a monad action (where the monad is `m`) that produces the "value" that is the result of the evaluation
          -> Expr r -> m (Value m r)
-exprEval onConstant onSeq onTens onFP getP expr = eval expr []
+exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
   where
     evalToBase e env = do
         res <- eval e env
@@ -165,7 +170,10 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
     eval :: Expr r -> [Value m r] -> m (Value m r)
     -- Handle the Net cases
     eval (ENum n) _ = return (VInt n)
-    eval ERead _ = liftM VInt getP
+    eval ERead _ = do 
+        param <- getP
+        onParam param
+        return (VInt param)     
     eval (EBin op x y) env = do
         let f = case op of
                     Add -> (+)
@@ -223,25 +231,6 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
                                 onFP
                                 return resPair
                 | otherwise -> error "Detected negative intcase argument!"
-
-    --foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
-    --   -> m (Bool, Value m r)
-    {--foldWFP n term f env = do
-        n' <- evalToInt n env
-
-        case n' of
-            0 -> Right (eval term env)
-            nonzero
-                | nonzero > 0 -> 
-                    let res = foldWFP (ENum (nonzero - 1)) term f env in
-                        case res of 
-                            Right tM -> do
-                                appM <- eval (EApp f (EPreComputed tM)) env
-                                app <- appM
-                                t <- tM
-                                if app == t then Left appM else Right appM
-                            Left _  -> res
-                | otherwise -> error "Detected negative intcase argument!"--}
     
     doRecurse :: Expr r -> Expr r -> [Value m r] -> (r -> r -> m (Value m r))
               -> m (Value m r)
@@ -252,7 +241,7 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
 
     --fromValue :: Value m r -> r
     fromValue (VBase p) = p
-    fromValue _ = error "Non-base type"  
+    fromValue _ = error "Non-base type" 
 
 newtype MaxComp = MaxComp (Integer, (Integer, Integer))
                 deriving Show
@@ -266,28 +255,38 @@ instance Ord MaxComp where
 instance NFData MaxComp where
     rnf (MaxComp d) = rnf d
 
--- function that is identical to the original
--- but wanted to hardcode the buffer example
+
 expr2NFAWFP :: IO Int -> Expr NFAWithBounds
          -> IO (NFAWithBounds, (Counters, Sizes, Bool))
 expr2NFAWFP getP expr = do
-    -- Tag all the imported NFAs with their IDs
-    let (numberedExpr, nfas) =
-            runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty False 
-    second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
+    param <- getP
+    makeProof param
   where
+    makeProof n =  do
+        ref <- newIORef (fromMaybe [] (Just [n]))
+        -- TODODODODO try putting the first let in top level function
+        let (numberedExpr, nfas) =
+                runState (traverse initialNumbering expr) (0, [])
+            initState = MemoState initCounters nfas M.empty HM.empty False Nothing
+            getP' = promptForParam ref
+        case n of 
+            1 -> do
+                second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
+            _ -> do
+                second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
+                makeProof (n - 1)    
+
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
-    doEval numberedExpr = do
-        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) numberedExpr
+    doEval numberedExpr getP' = do
+        res <- exprEval onNet onSeq onTens onFixedPoint onParam (lift getP') numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
 
-    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints) =
+    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
         (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints)
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
@@ -304,6 +303,7 @@ expr2NFAWFP getP expr = do
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
     onFixedPoint = fixedPoint .= True
+    onParam n = fpcounter .= Just n
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -386,20 +386,20 @@ expr2NFA getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
             runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty False 
+        initState = MemoState initCounters nfas M.empty HM.empty False Nothing
     second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
   where
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
     doEval numberedExpr = do
-        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) numberedExpr
+        res <- exprEval onNet onSeq onTens onFixedPoint onParam (lift getP) numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
 
-    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints) =
+    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
         (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints)
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
@@ -416,6 +416,7 @@ expr2NFA getP expr = do
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
     onFixedPoint = fixedPoint .= True
+    onParam n = fpcounter .= Just n
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -494,4 +495,23 @@ expr2NFA getP expr = do
               (NFAWithBoundaries nfa2 l2 r2) = l1 == l2 && r1 == r2 &&
                             equivalenceHKC nfa1 nfa2
 
+
+--foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
+--   -> m (Bool, Value m r)
+{--foldWFP n term f env = do
+    n' <- evalToInt n env
+
+    case n' of
+        0 -> Right (eval term env)
+        nonzero
+            | nonzero > 0 -> 
+                let res = foldWFP (ENum (nonzero - 1)) term f env in
+                    case res of 
+                        Right tM -> do
+                            appM <- eval (EApp f (EPreComputed tM)) env
+                            app <- appM
+                            t <- tM
+                            if app == t then Left appM else Right appM
+                        Left _  -> res
+            | otherwise -> error "Detected negative intcase argument!"--}
 
