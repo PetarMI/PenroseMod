@@ -224,6 +224,16 @@ nfaWB2NFAOutput
           where
             labels = intercalate "," . map showNFAWBPath $ S.toList lbls
 
+nfaReachability :: NFAWithBoundaries s -> Bool
+nfaReachability 
+    (NFAWithBoundaries (NFA lts@(LTS _) _ isFinal) _ _) =
+        isReachable $ filter isFinal states
+  where 
+    states = S.toList $ statesLTS lts
+    isReachable [] = False
+    isReachable _  = True
+
+
 data BoolOrWild = B Bool
                 | WildCard
                 deriving ( Eq, Ord )

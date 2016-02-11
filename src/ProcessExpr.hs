@@ -26,7 +26,7 @@ import Minimisation ( minimise )
 import LTS ( statesLTS )
 import NFA ( NFAWithBoundaries(..), tensor, modifyNFAWB, compose
            , toNFAWithMarking, equivalenceHKC, epsilonCloseNFA, NFA(..)
-           , reflexivelyCloseNFA )
+           , reflexivelyCloseNFA, nfaReachability )
 import Nets ( composeMarkedNet, tensor, MarkedNet )
 import Util ( promptForParam )
 import Data.IORef ( newIORef )
@@ -260,9 +260,9 @@ expr2NFAWFP :: IO Int -> Expr NFAWithBounds
          -> IO (NFAWithBounds, (Counters, Sizes, Bool))
 expr2NFAWFP getP expr = do
     param <- getP
-    makeProof param
+    makeProof param True
   where
-    makeProof n =  do
+    makeProof n maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
         -- TODODODODO try putting the first let in top level function
         let (numberedExpr, nfas) =
@@ -273,8 +273,13 @@ expr2NFAWFP getP expr = do
             1 -> do
                 second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
             _ -> do
-                second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
-                makeProof (n - 1)    
+                evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
+                let nfa = nfaReachability $ fst evalRes
+                    counts = snd evalRes
+                case (maxIter, nfa, counts) of 
+                    (True, _, (_, _, False)) -> return evalRes
+                    (_, False, _)            -> return evalRes
+                    _ -> makeProof (n - 1) False  
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
