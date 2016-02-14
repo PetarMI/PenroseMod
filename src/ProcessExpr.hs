@@ -28,7 +28,7 @@ import NFA ( NFAWithBoundaries(..), tensor, modifyNFAWB, compose
            , toNFAWithMarking, equivalenceHKC, epsilonCloseNFA, NFA(..)
            , reflexivelyCloseNFA, nfaReachability )
 import Nets ( composeMarkedNet, tensor, MarkedNet )
-import Util ( promptForParam )
+import Util ( promptForParam, ReachabilityResult(..) )
 import Data.IORef ( newIORef )
 import Debug.Trace
 
@@ -257,28 +257,32 @@ instance NFData MaxComp where
 
 
 expr2NFAWFP :: IO Int -> Expr NFAWithBounds
-         -> IO (NFAWithBounds, (Counters, Sizes, Bool))
+         -> IO ReachabilityResult
 expr2NFAWFP getP expr = do
     param <- getP
     makeProof param True
   where
     makeProof n maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
-        -- TODODODODO try putting the first let in top level function
+        -- TODO try putting the first let in top level function
         let (numberedExpr, nfas) =
                 runState (traverse initialNumbering expr) (0, [])
             initState = MemoState initCounters nfas M.empty HM.empty False Nothing
             getP' = promptForParam ref
         case n of 
             1 -> do
-                second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
+                evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
+                let nfa = nfaReachability $ fst evalRes
+                case nfa of 
+                    True -> return FPVerifiable
+                    False -> return (FPUnverifiable n)
             _ -> do
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
                 let nfa = nfaReachability $ fst evalRes
                     counts = snd evalRes
                 case (maxIter, nfa, counts) of 
-                    (True, _, (_, _, False)) -> return evalRes
-                    (_, False, _)            -> return evalRes
+                    (True, _, (_, _, False)) -> return (FPUnreachable n)
+                    (_, False, _)            -> return (FPUnverifiable n)
                     _ -> makeProof (n - 1) False  
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify

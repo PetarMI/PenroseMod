@@ -51,3 +51,12 @@ promptForParam ref = do
         case readMay line of
             Just x -> return x
             Nothing -> putStrLn "Invalid number, try again!" >> getInt
+
+data ReachabilityResult = 
+    FPVerifiable | FPUnverifiable Int | FPUnreachable Int
+
+instance Show ReachabilityResult where
+    show FPVerifiable     = "Fixed point reached and system can be globally verified."
+    show (FPUnverifiable n) = "Fixed point reached, but reachability fails for n = " ++ show n
+    show (FPUnreachable n)  = "Fixed point could not be reached for n = " ++ show n
+

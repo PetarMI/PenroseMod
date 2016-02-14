@@ -103,7 +103,10 @@ main = do
                                , indent $ show fixedPoint
                                ]
 
-    printRes quiet ( NFAResultWFP ( res
+    printRes _ ( NFAResultWFP res, _ ) = do
+        putStrLn res                           
+
+    {--printRes quiet ( NFAResultWFP ( res
                                , ( Counters (StrictTriple net2nfa nfa neither)
                                             (StrictQuad compYes compNo tenYes tenNo)
                                  , (net2nfas, nfas, binops)
@@ -139,7 +142,7 @@ main = do
                                , indent $ show binops ++ " Binary op triples."
                                , "Fixed point"
                                , indent $ show fixedPoint
-                               ]                             
+                               ]   --}                          
 
 outputTypes :: String
 outputTypes = $(do

@@ -30,7 +30,7 @@ import Nets ( NetWithBoundaries(..), net2LLNet, net2LOLANet, MarkedNet
             , net2LLNetWithReadArcs )
 import PEPReadArcs ( unparseLLNetWithReadArcs )
 import PEP ( unparseLLNet, llNet2Dot, llNet2PNML )
-import NFA ( nfaWB2Dot, nfaWB2NFAOutput, NFAWithBoundaries(..)
+import NFA ( nfaWB2Dot, nfaWB2NFAOutput, nfaWB2NFAReachabilityOutput, NFAWithBoundaries(..)
            , toNFAWithMarking )
 import Util ( promptForParam, timeIO, failError, (.:), pretty )
 import ProcessExpr
@@ -56,11 +56,11 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
               ++ "output,\nexploiting memoisation and language-equivalence."
 
 data RunResult = NFAResult (String, (Counters, Sizes, Bool))
-               | NFAResultWFP (String, (Counters, Sizes, Bool))
+               | NFAResultWFP String
                | NWBResult String
                | RawResult String
                deriving Show
-
+ 
 instance NFData RunResult where
     rnf (NFAResult x) = rnf x
     rnf (NFAResultWFP x) = rnf x
@@ -88,7 +88,8 @@ runner outputType file mbParams = do
                 -- partially apply goNFA with nfaWB2NFAOutput
                 -- nfaWB2NFAOutput is some datatype
                 Comp_NFA -> goNFA nfaWB2NFAOutput
-                Comp_NFA_FP -> goNFA_FP nfaWB2NFAOutput
+                -- TODO change name of output function
+                Comp_NFA_FP -> goNFA_FP nfaWB2NFAReachabilityOutput
                 Comp_NFADot -> goNFA nfaWB2Dot
   where
     libDir = takeDirectory file </> "lib"
@@ -106,7 +107,7 @@ runner outputType file mbParams = do
     -- getP is the Int that the user passes
     -- goNFA_FP fmt input getP = doOutput NFAResult_WFP (first fmt) (expr2NFAWFP getP)
     goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
-        doOutput NFAResultWFP (first fmt) (expr2NFAWFP getP)
+        doOutput NFAResultWFP fmt (expr2NFAWFP getP)
 
     -- What we return after we get the result
     doOutput toRes format convert =
@@ -117,7 +118,6 @@ runner outputType file mbParams = do
     getNFABounds (NFAWithBoundaries _ l r) = (l, r)
 
     -- called by goNFA
-    -- not sure what outputter does
     runWith getLib getBounds input outputter = do
         lib <- getLib
         let lookupImport name = lib >>= M.lookup name
