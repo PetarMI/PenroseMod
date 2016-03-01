@@ -20,4 +20,4 @@ TRANS { {in, out}
       }
 
 WIRING
-lend ; n_sequence read node ; term
+lend ; node ** ; term

@@ -42,5 +42,5 @@ TRANS { {l1, r1}
       }
 
 WIRING
-bind nodes = intcase read wnode (\x : Net 2 2 . node ; x) in
+bind nodes = starcase read wnode (\x : Net 2 2 . node ; x) in
 lend ; inject ; nodes ; rend

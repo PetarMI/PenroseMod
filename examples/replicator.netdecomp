@@ -30,5 +30,5 @@ TRANS { {input, >got} }
 
 WIRING
 IMPORT id
-bind repls = n_sequence read replicator in
+bind repls = replicator ** in
 addTok ; repls ; takeTok

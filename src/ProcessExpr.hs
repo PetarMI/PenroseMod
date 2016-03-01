@@ -5,7 +5,7 @@ module ProcessExpr where
 import Control.Arrow ( second, (***) )
 import Control.Applicative ( (<$>) )
 import Control.DeepSeq ( NFData(..) )
-import Control.Lens ( makeLenses, (%=), use, (.=) )
+import Control.Lens ( makeLenses, (%=), use, (.=), (^.) )
 import Control.Monad ( when, liftM )
 import Control.Monad.Trans ( lift )
 import Control.Monad.Trans.State.Strict ( StateT, runStateT, modify
@@ -136,7 +136,7 @@ $(makeLenses ''MemoState)
 type Sizes = (Int, Int, Int)
 type NFAEvalM = StateT MemoState IO
 
-exprEval :: forall r m . (Monad m, Eq r)
+exprEval :: forall r m . (Monad m, Eq r, Show r)
          -- A function that'll turn nets into an "r" (whatever r ends up being)
          => (InterleavingMarkedNet -> m r)
          -- A function to handle the sequential composition of two `r`s to produce a (monad-action producing a) value
@@ -144,15 +144,15 @@ exprEval :: forall r m . (Monad m, Eq r)
          -- A function to handle the tensor composition of two `r`s to produce a (monad-action producing a) value
          -> (r -> r -> m (Value m r))
          -- Function to set the fixed point status
-         -> (m ())
-         -- Function to set the parameter status
          -> (Int -> m ())
+         -- Function to set the parameter status
+         -- -> (Int -> m ())
          -- A monadic "action" that'll produce an int (probably easiest to ignore this for now)
          -> (m Int)
          -- The expression we're evaluating 
          -- return a monad action (where the monad is `m`) that produces the "value" that is the result of the evaluation
          -> Expr r -> m (Value m r)
-exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
+exprEval onConstant onSeq onTens onFP getP expr = eval expr []
   where
     evalToBase e env = do
         res <- eval e env
@@ -172,7 +172,6 @@ exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
     eval (ENum n) _ = return (VInt n)
     eval ERead _ = do 
         param <- getP
-        onParam param
         return (VInt param)     
     eval (EBin op x y) env = do
         let f = case op of
@@ -182,10 +181,12 @@ exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
         y' <- evalToInt y env
         return $ VInt $ x' `f` y'
     eval (EIntCase i z s) env = do
-        resPair <- foldWFP i z s env
+        n <- eval (ENum 0) env
+        resPair <- foldWFP i z s env n
         return (snd resPair)
-    eval (EStarCase i z s) env = do
-        resPair <- foldWFP i z s env
+    eval (EStarCase i z s n) env = do
+        offset <- eval n env
+        resPair <- foldWFP i z s env offset
         return (snd resPair)
     eval (EPreComputed pc) _ = return (VBase pc)
     eval (EConstant constant) _ = liftM VBase $ onConstant constant
@@ -209,7 +210,7 @@ exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
     -- eval :: Expr r -> [Value m r] -> m (Value m r)
     --foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
     --   -> m (Bool, Value m r)         
-    foldWFP n term f env = do
+    foldWFP n term f env fpOffset = do
         i' <- evalToInt n env
         -- evaluate either the zero or the (succ i) case
         case i' of
@@ -219,16 +220,20 @@ exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
                 return (True, baseRes)
             nonzero
                 | nonzero > 0 -> do
-                    resPair <- foldWFP (ENum (nonzero - 1)) term f env
+                    resPair <- trace ("Calling fold with: " ++ show i') (foldWFP (ENum (nonzero - 1)) term f env fpOffset)
                     let res = snd resPair
                         resExpr = fromValue res 
                         exec = fst resPair in 
                         case exec of 
                             True -> do
                                 app <- eval (EApp f (EPreComputed resExpr)) env
-                                if app == res then return (False, app) else return (True, app)
+                                if app == res 
+                                    then do 
+                                        onFP . offsettFixedPoint i' $ fromValueInt fpOffset
+                                        return (False, app) 
+                                    else 
+                                        return (True, app)
                             False -> do
-                                onFP
                                 return resPair
                 | otherwise -> error "Detected negative intcase argument!"
     
@@ -242,6 +247,16 @@ exprEval onConstant onSeq onTens onFP onParam getP expr = eval expr []
     --fromValue :: Value m r -> r
     fromValue (VBase p) = p
     fromValue _ = error "Non-base type" 
+
+    offsettFixedPoint :: Int -> Int -> Int
+    offsettFixedPoint n 0 = n
+    offsettFixedPoint 1 1 = 1
+    offsettFixedPoint n 1 = n - 1
+    offsettFixedPoint _ _ = error "Error in offsetting the fixed point"
+
+    -- used for the offsetting
+    fromValueInt (VInt p) = p
+    fromValueInt _ = error "Non-int type" 
 
 newtype MaxComp = MaxComp (Integer, (Integer, Integer))
                 deriving Show
@@ -268,7 +283,7 @@ expr2NFAWFP getP expr = do
         let (numberedExpr, nfas) =
                 runState (traverse initialNumbering expr) (0, [])
             initState = MemoState initCounters nfas M.empty HM.empty False Nothing
-            getP' = promptForParam ref
+            getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
         case n of 
             1 -> do
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
@@ -281,14 +296,15 @@ expr2NFAWFP getP expr = do
                 let nfa = nfaReachability $ fst evalRes
                     counts = snd evalRes
                 case (maxIter, nfa, counts) of 
-                    (True, _, (_, _, False)) -> return (FPUnreachable n)
-                    (_, False, _)            -> return (FPUnverifiable n)
-                    _ -> makeProof (n - 1) False  
+                    (True, _, (_, _, False, _)) -> return (FPUnreachable n)
+                    (_, False, _)               -> return (FPUnverifiable n)
+                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof p False)
+                    _                           -> makeProof (n - 1) False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
     doEval numberedExpr getP' = do
-        res <- exprEval onNet onSeq onTens onFixedPoint onParam (lift getP') numberedExpr
+        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP') numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
@@ -296,7 +312,7 @@ expr2NFAWFP getP expr = do
                                 ++ show other
 
     getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
-        (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints)
+        (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints, fpcount)
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
 
@@ -311,8 +327,9 @@ expr2NFAWFP getP expr = do
     unknownCompose = bumpOpCounter sq2
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
-    onFixedPoint = fixedPoint .= True
-    onParam n = fpcounter .= Just n
+    onFixedPoint n = do
+        fixedPoint .= True
+        fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -401,7 +418,7 @@ expr2NFA getP expr = do
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
     doEval numberedExpr = do
-        res <- exprEval onNet onSeq onTens onFixedPoint onParam (lift getP) numberedExpr
+        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) numberedExpr
         case res of
             -- in the end this is what is returned
             VBase (NFALang wh) -> return . fst . unWithId $ wh
@@ -424,8 +441,10 @@ expr2NFA getP expr = do
     unknownCompose = bumpOpCounter sq2
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
-    onFixedPoint = fixedPoint .= True
-    onParam n = fpcounter .= Just n
+    onFixedPoint n = do
+        fixedPoint .= True
+        fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
+    -- onParam n = fpcounter .= Just n
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do
@@ -461,8 +480,6 @@ expr2NFA getP expr = do
         case mbRes of
             -- if we already have that composition then we just return the value from the map
             Just nfa -> do
-                --fixedPoint %= (+ 1)
-                onFixedPoint
                 known >> return (VBase nfa)
             Nothing -> do
                 unknown

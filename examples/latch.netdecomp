@@ -1,0 +1,33 @@
+NET latch
+PLACES [ <exec, 1, 0>
+       , <terminated, 0, 1>
+       ]
+LBOUNDS []
+RBOUNDS [startProcs]
+TRANS { {exec>, startProcs, >terminated} }
+
+NET controller
+PLACES [ <ready, 1, 0> ]
+LBOUNDS [reqIn]
+RBOUNDS [startTask, passReq]
+TRANS { {ready>, reqIn, startTask, passReq } }
+
+NET proc
+PLACES [ <ready, 1, 0>
+       , <exec, 0, 1>
+       ]
+LBOUNDS [startExec]
+RBOUNDS []
+TRANS { {ready>, startExec, >exec} }
+
+NET rightend
+PLACES []
+LBOUNDS [consume]
+RBOUNDS []
+TRANS { {consume} }
+
+WIRING
+IMPORT id
+bind contProcess = controller ; (proc * id) in
+bind contProcs = contProcess ** in
+latch ; contProcs ; rightend

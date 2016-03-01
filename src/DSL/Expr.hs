@@ -58,7 +58,7 @@ data Expr p = EVar VarId
             | ENum Int
             | ERead
             | EIntCase (Expr p) (Expr p) (Expr p)
-            | EStarCase (Expr p) (Expr p) (Expr p)
+            | EStarCase (Expr p) (Expr p) (Expr p) (Expr p)
             | EBin BinOp (Expr p) (Expr p)
             | EConstant InterleavingMarkedNet
             | EPreComputed p
@@ -190,7 +190,7 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             (zeroCase', zTy) <- checkType' zeroCase
             (succCase', sTy) <- checkType' succCase
             checkTypeConstraint $ TCEquality sTy (zTy :-> zTy)
-            return (EStarCase i' zeroCase' succCase', zTy)
+            return (EStarCase i' zeroCase' succCase' (ENum 1), zTy)
         (SENSequence num net) -> do
             (_, netTy) <- checkType' net
             let varExpr = SEVar . VarId
@@ -219,7 +219,7 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
         (SEkstar net) -> do
             (_, netTy) <- checkType' net
             let varExpr = SEVar . VarId
-                -- TODODODODO
+                -- TODO
                 -- out of curiousity try binding the num to SERead as well
                 -- shouldnt make any difference 
                 dsExpr = SEBind net $
@@ -233,7 +233,7 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
                     | x == y -> do
                         -- desugaring of SEkstar to EStarCase
                         -- (dsExpr', dsExprType) <- trace (show dsExpr) (checkType' dsExpr) 
-                        (dsExpr', dsExprType) <- checkType' dsExpr
+                        (dsExpr', dsExprType) <- offsetStarCase <$> checkType' dsExpr
                         if dsExprType /= netTy
                             then error $ "dsExprType is not netTy: "
                                          ++ show dsExprType ++ " /= "
@@ -278,6 +278,10 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
         go (SETen se1 se2) = SETen <$> go se1 <*> go se2
         go x = return x
 
+    -- offsetStarCase :: Expr p -> Expr p
+    offsetStarCase (EBind v (EStarCase i z s _), t) = (EBind v (EStarCase i z s (ENum 0)), t)
+    offsetStarCase n                        = trace (show n) (error "Offsetting Error when desugaring")
+ 
     getNetType net = return $ case net of
             (SEConstant (_, (_, NetWithBoundaries l r _ _ _ _))) -> TyArr l r
             _ -> error "getNetType on non-net!"
