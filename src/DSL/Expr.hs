@@ -10,6 +10,8 @@ module DSL.Expr
     , InterleavingMarkedNet
     , checkType
     , TypeCheckError(..)
+    , exprSkeleton
+    , reassocExpr
     ) where
 
 import Control.Applicative ( (<$>), (<*>) )
@@ -20,6 +22,7 @@ import Control.Monad.Reader ( local, ask )
 import Data.Foldable ( Foldable )
 import Data.Traversable ( Traversable )
 import Safe ( atMay )
+import Util ( ReassocResult(..), ReassocType(..), (<||>) )
 import Debug.Trace
 
 import Nets ( NetWithBoundaries(..), MarkedNet )
@@ -315,3 +318,96 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             checkTypeConstraint $ TCEquality t1 t3
             checkTypeConstraint $ TCEquality t2 t4
         _ -> die $ IncompatableTypes ty1 ty2
+
+reassocExpr :: Expr t -> (Expr t, ReassocResult)
+reassocExpr expr = reassocExpr' expr ReassocFail 
+  where 
+    reassocExpr' :: Expr t -> ReassocResult -> (Expr t, ReassocResult)
+    reassocExpr' expr' reassoc = case expr' of
+        (ENum n) -> (ENum n, reassoc)
+        ERead    -> (ERead, reassoc)
+        (EBin op x y) -> (EBin op x y, reassoc)
+        (EIntCase n term f) -> (EIntCase n term f, reassoc)
+        (EStarCase n term f offset) -> (EStarCase n term f offset, reassoc)
+        (EPreComputed pc) -> (EPreComputed pc, reassoc)
+        (EConstant c) -> (EConstant c, reassoc)
+        (ESeq t1 t2) -> 
+            let (nexpr, reassoc1) = reassocSequence (ESeq t1 t2)
+            in (nexpr, reassoc <||> reassoc1)
+        (ETen t1 t2) -> 
+            let (et1, reassoc1) = reassocExpr' t1 reassoc
+                (et2, reassoc2) = reassocExpr' t2 reassoc
+            in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2)
+        (EVar v) -> (EVar v, reassoc)
+        (EApp f param) ->  
+            let (f', reassoc1) = reassocExpr' f reassoc
+                (param', reassoc2) = reassocExpr' param reassoc
+            in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2)
+        (ELam body) -> 
+            let (body', reassoc1) = reassocExpr' body reassoc
+            in (ELam body', reassoc <||> reassoc1)
+        (EBind e1 body) -> 
+            let (e1', reassoc1) = reassocExpr' e1 reassoc
+                (body', reassoc2) = reassocExpr' body reassoc
+            in (EBind e1' body', reassoc <||> reassoc1 <||> reassoc2)
+
+    reassocSequence :: Expr t -> (Expr t, ReassocResult)
+    reassocSequence expr' = case expr' of 
+        (ESeq e (EStarCase n term (ELam (ESeq t1 t2)) offset)) -> 
+                ((ESeq (EStarCase n e (ELam (ESeq t2 t1)) offset) term), (ReassocApplied LeftAssoc)) 
+        (ESeq (EStarCase n term (ELam (ESeq t1 t2)) offset) e) -> 
+                ((ESeq term (EStarCase n e (ELam (ESeq t2 t1)) offset)), (ReassocApplied RightAssoc))
+        _ -> (expr', ReassocFail)
+
+exprSkeleton :: forall t . Show t => Expr t -> String
+exprSkeleton expr = exprSkeleton' expr 0 2
+  where
+    exprSkeleton' :: Expr t -> Int -> Int -> String
+    exprSkeleton' expr' offset n = case expr' of
+        (EBind e body) -> 
+            let top = addOffset "Bind" offset
+                ch1 = exprSkeleton' e (offset + n) n
+                ch2 = exprSkeleton' body (offset + n) n
+            in  top ++ ch1 ++ ch2
+        (ELam body) -> 
+            let top = addOffset "Lambda" offset
+                ch  = exprSkeleton' body (offset + n) n
+            in top ++ ch
+        (ESeq e1 e2) -> 
+            let top = addOffset "Sequence composition" offset
+                ch1 = exprSkeleton' e1 (offset + n) n
+                ch2 = exprSkeleton' e2 (offset + n) n
+            in top ++ ch1 ++ ch2
+        (ETen e1 e2) -> 
+            let top = addOffset "Tensor product" offset
+                ch1 = exprSkeleton' e1 (offset + n) n
+                ch2 = exprSkeleton' e2 (offset + n) n
+            in top ++ ch1 ++ ch2
+        (EIntCase _ term f) -> 
+            let top = addOffset "IntCase" offset
+                ch1 = exprSkeleton' term (offset + n) n
+                ch2 = exprSkeleton' f (offset + n) n
+            in top ++ ch1 ++ ch2
+        (EStarCase _ term f (ENum i)) -> 
+            let op  = if i == 1 then "StarCase" else "N_Sequence" 
+                top = addOffset op offset
+                ch1 = exprSkeleton' term (offset + n) n
+                ch2 = exprSkeleton' f (offset + n) n
+            in top ++ ch1 ++ ch2
+        (EPreComputed _) ->
+            let top = addOffset "Precomputed" offset
+            in top
+        (EConstant _) ->
+            let top = addOffset "Constant" offset
+            in top
+        (EVar _) ->
+            let top = addOffset "Variable" offset
+            in top
+        (EApp _ _) -> 
+            let top = addOffset "Application" offset
+            in top
+        someexpr -> addOffset "Blargh" offset 
+
+addOffset :: String -> Int -> String
+addOffset str 0 = str ++ "\n"
+addOffset str n = ' ' : (addOffset str (n - 1))

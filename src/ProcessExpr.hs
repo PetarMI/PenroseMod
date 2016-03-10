@@ -19,7 +19,7 @@ import Data.Map.Strict ( Map )
 import qualified Data.Set as S
 import Data.Traversable ( traverse )
 import DSL.Expr ( Expr(..), Value(..), BinOp(..), VarId(varToInt)
-                , InterleavingMarkedNet )
+                , InterleavingMarkedNet, reassocExpr )
 import GHC.Generics ( Generic )
 import Marking ( concatMarkingList )
 import Minimisation ( minimise )
@@ -28,7 +28,7 @@ import NFA ( NFAWithBoundaries(..), tensor, modifyNFAWB, compose
            , toNFAWithMarking, equivalenceHKC, epsilonCloseNFA, NFA(..)
            , reflexivelyCloseNFA, nfaReachability )
 import Nets ( composeMarkedNet, tensor, MarkedNet )
-import Util ( promptForParam, ReachabilityResult(..) )
+import Util ( promptForParam, ReachabilityResult(..), ReassocResult(..) )
 import Data.IORef ( newIORef )
 import Debug.Trace
 
@@ -272,16 +272,25 @@ instance NFData MaxComp where
 
 
 expr2NFAWFP :: IO Int -> Expr NFAWithBounds
-         -> IO ReachabilityResult
+         -> IO (ReachabilityResult, ReassocResult)
 expr2NFAWFP getP expr = do
     param <- getP
-    makeProof param True
+    reachRes <- makeProof expr param True
+    case reachRes of 
+        FPVerifiable -> return (reachRes, ReassocNotAttempted)
+        _            -> do
+            let assocExpr = reassocExpr expr
+            case assocExpr of 
+                (nexpr, ReassocApplied a) -> do
+                    reachRes' <- makeProof nexpr param True
+                    return (reachRes', ReassocApplied a)
+                (_, ReassocFail)        -> return (reachRes, ReassocFail)
   where
-    makeProof n maxIter =  do
+    makeProof expr' n maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
         -- TODO try putting the first let in top level function
         let (numberedExpr, nfas) =
-                runState (traverse initialNumbering expr) (0, [])
+                runState (traverse initialNumbering expr') (0, [])
             initState = MemoState initCounters nfas M.empty HM.empty False Nothing
             getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
         case n of 
@@ -298,8 +307,8 @@ expr2NFAWFP getP expr = do
                 case (maxIter, nfa, counts) of 
                     (True, _, (_, _, False, _)) -> return (FPUnreachable n)
                     (_, False, _)               -> return (FPUnverifiable n)
-                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof p False)
-                    _                           -> makeProof (n - 1) False
+                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p False)
+                    _                           -> makeProof expr' (n - 1) False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 
@@ -522,22 +531,4 @@ expr2NFA getP expr = do
                             equivalenceHKC nfa1 nfa2
 
 
---foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
---   -> m (Bool, Value m r)
-{--foldWFP n term f env = do
-    n' <- evalToInt n env
-
-    case n' of
-        0 -> Right (eval term env)
-        nonzero
-            | nonzero > 0 -> 
-                let res = foldWFP (ENum (nonzero - 1)) term f env in
-                    case res of 
-                        Right tM -> do
-                            appM <- eval (EApp f (EPreComputed tM)) env
-                            app <- appM
-                            t <- tM
-                            if app == t then Left appM else Right appM
-                        Left _  -> res
-            | otherwise -> error "Detected negative intcase argument!"--}
 

@@ -103,9 +103,14 @@ main = do
                                , indent $ show fixedPoint
                                ]
 
-    printRes _ ( NFAResultWFP res, _ ) = do
-        putStrLn res                           
+    printRes _ ( NFAResultWFP (reach, reassoc),  _ ) = do
+        putStrLn reach
+        putStrLn reassoc
 
+    printRes _ ( NetExprResult (res, b), _ ) = do
+        putStrLn res  
+        putStrLn (show b)
+        
     {--printRes quiet ( NFAResultWFP ( res
                                , ( Counters (StrictTriple net2nfa nfa neither)
                                             (StrictQuad compYes compNo tenYes tenNo)

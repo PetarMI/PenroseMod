@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 module Run where
 
-import Control.Arrow ( first )
+import Control.Arrow ( first, second )
 import Control.Applicative ( (<$>) )
 import Control.DeepSeq ( NFData(..) )
 import Control.Monad ( filterM )
@@ -22,7 +22,7 @@ import System.PosixCompat.Files ( isRegularFile, getFileStatus )
 
 import DSL.ComponentsAndWiringParser ( parseComponentsAndWiring
                                      , parseNetDefinition )
-import DSL.Expr ( checkType, Type(..) )
+import DSL.Expr ( checkType, Type(..), exprSkeleton, Expr(..), reassocExpr )
 import DSL.ProcessParse ( lookupNames, netDefinitionToMarkedNet )
 import ParseNFA ( textToNFAWB )
 import LOLANets ( unparseLOLANet )
@@ -34,10 +34,12 @@ import NFA ( nfaWB2Dot, nfaWB2NFAOutput, nfaWB2NFAReachabilityOutput, NFAWithBou
            , toNFAWithMarking )
 import Util ( promptForParam, timeIO, failError, (.:), pretty )
 import ProcessExpr
+import Debug.Trace
 
 -- TODO: we should really separate the output type from the computation type
 data OutputType = Comp_NFA
                 | Comp_NFA_FP   -- The new mode in which Penrose will run
+                | Comp_Expr     -- mode just to show a skeleton of the resulting expr 
                 | Comp_NFADot
                 deriving (Read, Show)
 
@@ -52,20 +54,23 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
                               ++ "using Fixed-point checking for reachability")
         Comp_NFADot -> (compStr, "DOT format representation of resulting "
                                  ++ "(reduced) NFA")
+        Comp_Expr   -> (compStr, "Show the net which will be evaluated")
     compStr = "Compositional: traverse wiring decomposition, converting to "
               ++ "output,\nexploiting memoisation and language-equivalence."
 
 data RunResult = NFAResult (String, (Counters, Sizes, Bool))
-               | NFAResultWFP String
+               | NFAResultWFP (String, String)
                | NWBResult String
                | RawResult String
+               | NetExprResult (String, String)
                deriving Show
- 
+
 instance NFData RunResult where
     rnf (NFAResult x) = rnf x
     rnf (NFAResultWFP x) = rnf x
     rnf (NWBResult x) = rnf x
     rnf (RawResult x) = rnf x
+    rnf (NetExprResult x) = rnf x
 
 runner :: OutputType -> FilePath -> Maybe [Int] -> IO (RunResult, Double)
 runner outputType file mbParams = do
@@ -91,6 +96,8 @@ runner outputType file mbParams = do
                 -- TODO change name of output function
                 Comp_NFA_FP -> goNFA_FP nfaWB2NFAReachabilityOutput
                 Comp_NFADot -> goNFA nfaWB2Dot
+                Comp_Expr -> goExpr exprSkeleton
+
   where
     libDir = takeDirectory file </> "lib"
 
@@ -99,15 +106,16 @@ runner outputType file mbParams = do
     -- fmt is what to do with the result 
     -- second arg is a pair of the boundaries
     -- third argument is the input file
-    -- How do we get expr2NFA from doOutput
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
     -- fmt tells us how to format what the main eval function (expr2NFAWFP) returns
     -- input is the file that we do not right now (we are hardcoding the buffer)
     -- getP is the Int that the user passes
-    -- goNFA_FP fmt input getP = doOutput NFAResult_WFP (first fmt) (expr2NFAWFP getP)
     goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResultWFP fmt (expr2NFAWFP getP)
+
+    goExpr fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
+        doOutput NetExprResult (first fmt) convertExpr
 
     -- What we return after we get the result
     doOutput toRes format convert =
@@ -167,5 +175,12 @@ getLibraryContents dir = do
         else lift $ do
             contents <- map (dir </>) <$> getDirectoryContents dir
             filterM ((isRegularFile <$>) . getFileStatus) contents
+
+-- function for the extra mode
+-- we only need the expression produced by the typechecker 
+convertExpr :: Expr t -> IO (Expr t, String)
+convertExpr expr = return (second show (reassocExpr expr))
+
+
 
 

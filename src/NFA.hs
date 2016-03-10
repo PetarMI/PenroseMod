@@ -48,7 +48,7 @@ import Marking ( Marking, TokenStatus(..), WildCardMarking
                , wildCardMatchesMarking, setAtIndices, eqAtIndices )
 import Nets ( NetWithBoundaries(..), NetTransition(..), unionNetTransition
             , inContention, selfConflicting )
-import Util ( unlines, (.:), ReachabilityResult(..) )
+import Util ( unlines, (.:), ReachabilityResult(..), ReassocResult(..) )
 
 type SetFun a = a -> Bool
 
@@ -233,8 +233,8 @@ nfaReachability
     isReachable [] = False
     isReachable _  = True
 
-nfaWB2NFAReachabilityOutput :: ReachabilityResult -> String
-nfaWB2NFAReachabilityOutput res = show res
+nfaWB2NFAReachabilityOutput :: (ReachabilityResult, ReassocResult) -> (String, String)
+nfaWB2NFAReachabilityOutput (reach, reassoc) = (show reach, show reassoc)
 
 data BoolOrWild = B Bool
                 | WildCard

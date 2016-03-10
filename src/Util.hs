@@ -55,8 +55,26 @@ promptForParam ref = do
 data ReachabilityResult = 
     FPVerifiable | FPUnverifiable Int | FPUnreachable Int
 
+data ReassocResult = ReassocApplied ReassocType | ReassocFail | ReassocNotAttempted
+
+data ReassocType = LeftAssoc | RightAssoc 
+
 instance Show ReachabilityResult where
-    show FPVerifiable     = "Fixed point reached and system can be globally verified."
+    show FPVerifiable       = "Fixed point reached and system can be globally verified."
     show (FPUnverifiable n) = "Fixed point reached, but reachability fails for n = " ++ show n
     show (FPUnreachable n)  = "Fixed point could not be reached for n = " ++ show n
+
+instance Show ReassocResult where
+    show (ReassocApplied a)  = "Reassociation has been applied. The new tree is " ++ show a
+    show ReassocFail         = "Reassociation could not be applied for that type of expression."
+    show ReassocNotAttempted = "No attemp made to reassociate expression."
+
+instance Show ReassocType where
+    show LeftAssoc  = "Left associative"
+    show RightAssoc = "Right associative"
+
+(<||>) :: ReassocResult -> ReassocResult -> ReassocResult
+(<||>) (ReassocApplied a) _ = (ReassocApplied a)
+(<||>) _ (ReassocApplied a) = (ReassocApplied a)
+(<||>) _ _                  = ReassocFail
 
