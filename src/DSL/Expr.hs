@@ -320,44 +320,83 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
         _ -> die $ IncompatableTypes ty1 ty2
 
 reassocExpr :: Expr t -> (Expr t, ReassocResult)
-reassocExpr expr = reassocExpr' expr ReassocFail 
+reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
   where 
-    reassocExpr' :: Expr t -> ReassocResult -> (Expr t, ReassocResult)
-    reassocExpr' expr' reassoc = case expr' of
-        (ENum n) -> (ENum n, reassoc)
-        ERead    -> (ERead, reassoc)
-        (EBin op x y) -> (EBin op x y, reassoc)
-        (EIntCase n term f) -> (EIntCase n term f, reassoc)
-        (EStarCase n term f offset) -> (EStarCase n term f offset, reassoc)
-        (EPreComputed pc) -> (EPreComputed pc, reassoc)
-        (EConstant c) -> (EConstant c, reassoc)
+    reassocExpr' :: Expr t -> ReassocResult -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
+    reassocExpr' expr' reassoc boundExprs = case expr' of
+        (ENum n) -> (ENum n, reassoc, boundExprs)
+        ERead    -> (ERead, reassoc, boundExprs)
+        (EBin op x y) -> (EBin op x y, reassoc, boundExprs)
+        (EIntCase n term f) -> (EIntCase n term f, reassoc, boundExprs)
+        (EStarCase n term f offset) -> (EStarCase n term f offset, reassoc, boundExprs)
+        (EPreComputed pc) -> (EPreComputed pc, reassoc, boundExprs)
+        (EConstant c) -> (EConstant c, reassoc, boundExprs)
         (ESeq t1 t2) -> 
-            let (nexpr, reassoc1) = reassocSequence (ESeq t1 t2)
-            in (nexpr, reassoc <||> reassoc1)
+            let (nexpr, reassoc1, boundExprs') = reassocSequence (ESeq t1 t2) boundExprs
+            in (nexpr, reassoc <||> reassoc1, boundExprs')
         (ETen t1 t2) -> 
-            let (et1, reassoc1) = reassocExpr' t1 reassoc
-                (et2, reassoc2) = reassocExpr' t2 reassoc
-            in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2)
-        (EVar v) -> (EVar v, reassoc)
+            let (et1, reassoc1, boundExprs1) = reassocExpr' t1 reassoc boundExprs
+                (et2, reassoc2, boundExprs2) = reassocExpr' t2 reassoc boundExprs
+            in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2, boundExprs)
+        (EVar v) -> (EVar v, reassoc, boundExprs)
         (EApp f param) ->  
-            let (f', reassoc1) = reassocExpr' f reassoc
-                (param', reassoc2) = reassocExpr' param reassoc
-            in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2)
+            let (f', reassoc1, boundExprs1) = reassocExpr' f reassoc boundExprs
+                (param', reassoc2, boundExprs2) = reassocExpr' param reassoc boundExprs
+            in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2, boundExprs)
         (ELam body) -> 
-            let (body', reassoc1) = reassocExpr' body reassoc
-            in (ELam body', reassoc <||> reassoc1)
+            let (body', reassoc1, boundExprs') = reassocExpr' body reassoc boundExprs
+            in (ELam body', reassoc <||> reassoc1, boundExprs')
         (EBind e1 body) -> 
-            let (e1', reassoc1) = reassocExpr' e1 reassoc
-                (body', reassoc2) = reassocExpr' body reassoc
-            in (EBind e1' body', reassoc <||> reassoc1 <||> reassoc2)
+            let (e1', reassoc1, boundExprs1) = reassocExpr' e1 reassoc boundExprs
+                (body', reassoc2, boundExprs2) = reassocExpr' body reassoc (e1 : boundExprs)
+            in (EBind (head boundExprs2) body', reassoc <||> reassoc1 <||> reassoc2, (tail boundExprs2))
 
-    reassocSequence :: Expr t -> (Expr t, ReassocResult)
-    reassocSequence expr' = case expr' of 
+    reassocSequence :: Expr t -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
+    reassocSequence expr' boundExprs = case expr' of 
         (ESeq e (EStarCase n term (ELam (ESeq t1 t2)) offset)) -> 
-                ((ESeq (EStarCase n e (ELam (ESeq t2 t1)) offset) term), (ReassocApplied LeftAssoc)) 
+                ((ESeq (EStarCase n e (ELam (ESeq t2 t1)) offset) term), (ReassocApplied LeftAssoc), boundExprs) 
         (ESeq (EStarCase n term (ELam (ESeq t1 t2)) offset) e) -> 
-                ((ESeq term (EStarCase n e (ELam (ESeq t2 t1)) offset)), (ReassocApplied RightAssoc))
-        _ -> (expr', ReassocFail)
+                ((ESeq term (EStarCase n e (ELam (ESeq t2 t1)) offset)), (ReassocApplied RightAssoc), boundExprs)
+        (ESeq const' (EVar v)) -> 
+            let (intCase, term, reassocRes) = reassocIntCase (EVar v) const' RightAssoc boundExprs
+                boundExprs' = substitudeIntCase intCase (varToInt v) boundExprs
+            in case reassocRes of 
+                (ReassocApplied a) -> ((ESeq (EVar v) term), reassocRes, boundExprs')
+                ReassocFail -> ((ESeq const' (EVar v)), reassocRes, boundExprs)
+        (ESeq (EVar v) const') -> 
+            let (intCase, term, reassocRes) = reassocIntCase (EVar v) const' LeftAssoc boundExprs
+                boundExprs' = substitudeIntCase intCase (varToInt v) boundExprs
+            in case reassocRes of 
+                (ReassocApplied a) -> ((ESeq term (EVar v)), reassocRes, boundExprs')
+                ReassocFail -> ((ESeq (EVar v) const'), reassocRes, boundExprs)
+        _ -> (expr', ReassocFail, boundExprs)
+
+    -- 1st arg - the variable that we resolve
+    -- 2nd arg - constant that will go in the lambda
+    -- 3rd arg - type of association that the expression has before reassociating
+    -- 4th arg - environment with bindings 
+    -- return
+    --    the intcase which we have to rebind
+    --    the term from the lambda that becomes an arg in the sequence composition 
+    --    has association been applied
+    reassocIntCase :: Expr t -> Expr t -> ReassocType -> [Expr t] -> (Expr t, Expr t, ReassocResult)
+    reassocIntCase (EVar v) const' assocType boundExprs = 
+        let varExpr = boundExprs !! varToInt v
+        in case (varExpr, assocType) of
+            ((EStarCase n term (ELam (ESeq t (EVar v'))) offset), RightAssoc) -> 
+                ((EStarCase n const' (ELam (ESeq (EVar v') t)) offset), term, (ReassocApplied LeftAssoc))
+            ((EStarCase n term (ELam (ESeq (EVar v') t)) offset), LeftAssoc) ->
+                ((EStarCase n const' (ELam (ESeq t (EVar v'))) offset), term, (ReassocApplied RightAssoc))
+            _ -> ((EVar v), const', ReassocFail)
+    reassocIntCase _ _ _ _ = error "Error while reassociating IntCase"
+
+    substitudeIntCase :: Expr t -> Int -> [Expr t] -> [Expr t]
+    substitudeIntCase intCase 0 (x:xs) = (intCase : xs)
+    substitudeIntCase intCase n (x:xs) = x : (substitudeIntCase intCase (n - 1) xs)
+    substitudeIntCase _ _ []           = error "Error while reassociating variable binding"
+
+    takeExpr res = case res of 
+        (expr', reassocRes, _) -> (expr', reassocRes)
 
 exprSkeleton :: forall t . Show t => Expr t -> String
 exprSkeleton expr = exprSkeleton' expr 0 2
@@ -406,7 +445,7 @@ exprSkeleton expr = exprSkeleton' expr 0 2
         (EApp _ _) -> 
             let top = addOffset "Application" offset
             in top
-        someexpr -> addOffset "Blargh" offset 
+        _ -> addOffset "Blargh" offset 
 
 addOffset :: String -> Int -> String
 addOffset str 0 = str ++ "\n"
