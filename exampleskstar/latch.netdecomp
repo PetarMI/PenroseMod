@@ -29,5 +29,5 @@ TRANS { {consume} }
 WIRING
 IMPORT id
 bind contProcess = controller ; (proc * id) in
-bind contProcs = n_sequence read contProcess in
+bind contProcs = contProcess ** in
 latch ; contProcs ; rightend

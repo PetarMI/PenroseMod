@@ -90,4 +90,4 @@ TRANS {}
 WIRING
 bind iLock = lLockInterface ; lock ; rLockInterface in
 bind lockedClient = iLock ; client in
-lterminator ; intcase read (iLock ; rterminator) (\x : Net 4 0 . lockedClient ; x) 
+lterminator ; starcase read (iLock ; rterminator) (\x : Net 4 0 . lockedClient ; x) 

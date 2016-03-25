@@ -31,5 +31,5 @@ TRANS { {in} }
 WIRING
 IMPORT id
 bind yesNo = chosen ; notchosen in
-bind choices = intcase read rTerm (\x : Net 1 0 . yesNo ; x) in
+bind choices = starcase read rTerm (\x : Net 1 0 . yesNo ; x) in
 addToken ; choices

@@ -1,0 +1,43 @@
+NET task
+PLACES [ <prep, 1, 0>
+       , <ready, 0, 1>
+       , <exec, 0, *> 
+       ]
+LBOUNDS [checkReady, start]
+RBOUNDS []
+TRANS { {prep>, >ready}
+      , {ready?, checkReady}
+      , {ready>, start, >exec}
+      }
+
+NET controller 
+PLACES [ <prep, 1, 0>
+       , <ready, 0, 0>
+       ]
+LBOUNDS [prevReady, reqStart]
+RBOUNDS [curReady, startCur, notifyNext, startNext]
+TRANS { {prep>, prevReady, curReady, notifyNext, >ready }
+      , {ready>, reqStart, startCur, startNext}
+      }
+
+NET barrier
+PLACES [ <startProcs, 1, 0> ]
+LBOUNDS [allReady]
+RBOUNDS [sayReady, startTasks]
+TRANS { {startProcs>, sayReady}
+      , {allReady, startTasks} 
+      }
+
+NET idrend
+PLACES []
+LBOUNDS [in, consume]
+RBOUNDS [out]
+TRANS { {in, out}
+      , {consume}
+      }
+
+WIRING
+IMPORT id, id2, epsilon, eta
+bind contTask = controller ; (task * id2) in
+bind contTasks = n_sequence read contTask in
+eta ; ((barrier ; contTasks ; idrend) * id) ; epsilon

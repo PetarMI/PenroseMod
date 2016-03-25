@@ -59,7 +59,7 @@ import DSL.ComponentsAndWiringParser ( ComponentsAndWiring(..)
                                      , WiringDefinition(..) )
 import DSL.ProcessParse ( lookupNames )
 import DSL.RawExprParser ( parseRawExpr )
-import DSL.Expr ( Type(..), checkType, Value(..), Expr(..), VarId(..), BinOp(..) )
+import DSL.Expr ( Type(..), checkType, Value(..), Expr(..), VarId(..), BinOp(..), TypeCheckError(..) )
 
 import Util ( unlines )
 import Prelude hiding ( unlines )
@@ -91,7 +91,7 @@ tests =
         , testCase "multiple queries of same place" queriesSamePlace
         , testCase "sync on same internal boundary" syncCommonBoundary
         ]
-    , testGroup "to NFA"
+    {--, testGroup "to NFA"
         [ testCase "simple net to nfa" simpleToNFA
         , testCase "epsilon loops" epsilonLoopsInNFA
         , testCase "interleaving test" useInterleaving
@@ -193,14 +193,26 @@ tests =
         , testCase "dead states with loops" dontKillNonDeadStates
         , testCase "dead states init is final" deadStatesInitIsFinal
         , testProperty "minimise preserve lang" prop_minimise_preserve_lang
-        ]
+        ]--}
     , testGroup "Evaluation"
         [ testCase "Recursive function" evalRecFunction
         , testCase "Unused bind" evalUnusedBind
         ]
     , testGroup "Type Checking"
         [ testCase "Type checking1" typeChecking1
-        , testCase "Type checking2" typeChecking2        
+        , testCase "Type checking2" typeChecking2
+        , testCase "Type checking3" typeChecking3 
+        , testCase "Type checking4" typeChecking4  
+        , testCase "Type checking5" typeChecking5 
+        , testCase "Type checking6" typeChecking6
+        , testCase "Type checking7" typeChecking7 
+        , testCase "Type checking8" typeChecking8 
+        , testCase "Type checking9" typeChecking9 
+        , testCase "Type checking10" typeChecking10  
+        , testCase "Type checking11" typeChecking11   
+        , testCase "Type checking12" typeChecking12 
+        , testCase "Type checking13" typeChecking13   
+        , testCase "Type checking14" typeChecking14     
         ]
     , testGroup "To strings"
         [ testCase "simple to DotNet" simpleDotNet
@@ -1907,6 +1919,282 @@ typeChecking2 = doTypeCheck input nameMap expectedOr
 
     expectedOr = Right (expectedExpr, TyArr 1 1)
 
+typeChecking3 :: Assertion
+typeChecking3 = doTypeCheck input [] expectedOr
+    where
+    input = [ "\\x : Net 1 1 . n_sequence ((\\y : Int . y) 2) ((\\y : Int. x) 3)" ]
+
+    expectedExpr = ELam (EBind (EApp (ELam (EVar (VarId 0))) (ENum 2))
+                        (EBind (EApp (ELam (EVar (VarId 2))) (ENum 3))
+                           (EIntCase
+                               (EBin Sub (EVar (VarId 1)) (ENum 1))
+                               (EVar (VarId 0))
+                               (ELam (ESeq (EVar (VarId 0)) (EVar (VarId 1)))))))
+
+    expectedOr = Right (expectedExpr, TyArr 1 1 :-> TyArr 1 1)
+
+-- test valid right associativity
+typeChecking4 :: Assertion
+typeChecking4 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; starcase read rightend (\\x : Net 1 0 . opb ; x)" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EPreComputed (0, 1))
+                               (EStarCase
+                                   ERead
+                                   (EPreComputed (1, 0))
+                                   (ELam (ESeq (EVar (VarId 1)) (EVar (VarId 0))))
+                                   (ENum 1)))
+
+    expectedOr = Right (expectedExpr, TyArr 0 0)
+
+-- test valid left associativity
+typeChecking5 :: Assertion
+typeChecking5 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "starcase read leftend (\\x : Net 0 1 . x ; opb) ; rightend" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EStarCase
+                                   ERead
+                                   (EPreComputed (0, 1))
+                                   (ELam (ESeq (EVar (VarId 0)) (EVar (VarId 1))))
+                                   (ENum 1))
+                               (EPreComputed (1, 0)))
+
+    expectedOr = Right (expectedExpr, TyArr 0 0)
+
+-- test nested sequence composition
+typeChecking6 :: Assertion
+typeChecking6 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind op1 = n in"
+            , "bind op2 = m in"
+            , "starcase read leftend (\\x : Net 0 2 . x ; (op1 ; op2)) ; rightend" 
+            ]
+
+    nameMap = [ ("leftend", (0, 2))
+              , ("rightend", (2, 0))
+              , ("n", (2, 1))
+              , ("m", (1, 2))
+              ]
+
+    expectedExpr = EBind (EPreComputed (2, 1))
+                         (EBind (EPreComputed (1, 2))
+                             (ESeq (EStarCase
+                                       ERead
+                                       (EPreComputed (0, 2))
+                                       (ELam (ESeq (EVar (VarId 0)) (ESeq (EVar (VarId 2)) 
+                                                                          (EVar (VarId 1)))))
+                                       (ENum 1))
+                                   (EPreComputed (2, 0))))
+
+    expectedOr = Right (expectedExpr, TyArr 0 0)
+
+-- test invalid type check with parameter type
+typeChecking7 :: Assertion
+typeChecking7 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; starcase read rightend (\\x : Net 2 1 . opb ; x)" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EPreComputed (0, 1))
+                               (EStarCase
+                                   ERead
+                                   (EPreComputed (1, 0))
+                                   (ELam (ESeq (EVar (VarId 1)) (EVar (VarId 0))))
+                                   (ENum 1)))
+
+    expectedOr = Left "InvalidCompose 1 1 2 1"
+
+-- test invalid type check with parameter type
+typeChecking8 :: Assertion
+typeChecking8 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; starcase read rightend (\\x : Net 2 1 . opb ; x)" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EPreComputed (0, 1))
+                               (EStarCase
+                                   ERead
+                                   (EPreComputed (1, 0))
+                                   (ELam (ESeq (EVar (VarId 1)) (EVar (VarId 0))))
+                                   (ENum 1)))
+
+    expectedOr = Left "InvalidCompose 1 1 2 1"
+
+-- test invalid type check of sequence inside lambda
+typeChecking9 :: Assertion
+typeChecking9 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; starcase read rightend (\\x : Net 1 0 . opb ; x)" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 2))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EPreComputed (0, 1))
+                               (EStarCase
+                                   ERead
+                                   (EPreComputed (1, 0))
+                                   (ELam (ESeq (EVar (VarId 1)) (EVar (VarId 0))))
+                                   (ENum 1)))
+
+    expectedOr = Left "InvalidCompose 1 2 1 0"
+
+-- test invalid sequence compositions between EStarCase evaluation and net
+typeChecking10 :: Assertion
+typeChecking10 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "starcase read leftend (\\x : Net 0 1 . x ; opb) ; rightend" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (2, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EStarCase
+                                   ERead
+                                   (EPreComputed (0, 1))
+                                   (ELam (ESeq (EVar (VarId 0)) (EVar (VarId 1))))
+                                   (ENum 1))
+                               (EPreComputed (1, 0)))
+
+    expectedOr = Left "InvalidCompose 0 1 2 0"
+
+-- test invalid type check message with two faulty compositions
+typeChecking11 :: Assertion
+typeChecking11 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "starcase read leftend (\\x : Net 0 1 . x ; opb) ; rightend" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (0, 0))
+              , ("n", (2, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EStarCase
+                                   ERead
+                                   (EPreComputed (0, 1))
+                                   (ELam (ESeq (EVar (VarId 0)) (EVar (VarId 1))))
+                                   (ENum 1))
+                               (EPreComputed (1, 0)))
+
+    expectedOr = Left "InvalidCompose 0 1 2 1"
+
+-- correct type checkign of Kleene star
+typeChecking12 :: Assertion
+typeChecking12 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; opb ** ; rightend" 
+            ]
+
+    nameMap = [ ("leftend", (0, 1))
+              , ("rightend", (1, 0))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (ESeq (EPreComputed (0, 1))
+                                     (EBind (EVar (VarId 0))
+                                            (EStarCase 
+                                                (EBin Sub ERead (ENum 1))
+                                                (EVar (VarId 0))
+                                                (ELam (ESeq (EVar (VarId 0))
+                                                            (EVar (VarId 1))))
+                                                (ENum 0))))
+                               (EPreComputed (1, 0)))
+
+    expectedOr = Right (expectedExpr, TyArr 0 0)
+
+-- invalid left operand
+typeChecking13 :: Assertion
+typeChecking13 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "leftend ; opb **" 
+            ]
+
+    nameMap = [ ("leftend", (0, 2))
+              , ("n", (1, 1))
+              ]
+
+    expectedExpr = EBind (EPreComputed (1, 1))
+                         (ESeq (EPreComputed (0, 2))
+                               (EBind (EVar (VarId 0))
+                                      (EStarCase 
+                                          (EBin Sub ERead (ENum 1))
+                                          (EVar (VarId 0))
+                                          (ELam (ESeq (EVar (VarId 0))
+                                                      (EVar (VarId 1))))
+                                          (ENum 0))))
+
+    expectedOr = Left "InvalidCompose 0 2 1 1"
+
+-- invalid right operand
+typeChecking14 :: Assertion
+typeChecking14 = doTypeCheck input nameMap expectedOr
+    where 
+    input = [ "bind opb = n in"
+            , "opb ** ; rightend" 
+            ]
+
+    nameMap = [ ("rightend", (1, 0))
+              , ("n", (2, 2))
+              ]
+
+    expectedExpr = EBind (EPreComputed (2, 2))
+                         (ESeq (EBind (EVar (VarId 0))
+                                      (EStarCase 
+                                            (EBin Sub ERead (ENum 1))
+                                            (EVar (VarId 0))
+                                            (ELam (ESeq (EVar (VarId 0))
+                                                        (EVar (VarId 1))))
+                                            (ENum 0)))
+                               (EPreComputed (1, 0)))
+
+    expectedOr = Left "InvalidCompose 2 2 1 0"
+
 -- data BinOp = Add
 --            | Sub
 --            deriving (Eq, Show)
@@ -1941,16 +2229,17 @@ typeChecking2 = doTypeCheck input nameMap expectedOr
 --         -> (m Int)
 --         -> Expr r -> m (Value m r)
 
-instance Eq r => Eq (Value m r) where
-    (VBase p) == (VBase q) = p == q
-    (VInt i) == (VInt j) = i == j
-    _ == _ = False
+--instance Eq r => Eq (Value m r) where
+    --(VBase p) == (VBase q) = p == q
+    --(VInt i) == (VInt j) = i == j
+    --_ == _ = False
 
 
-addEvalLeet = exprEval (const . return $ 1337) add add getParam
+addEvalLeet = exprEval (const . return $ 1337) add add onfp getParam
   where
     getParam = return 0
     add = (\x y -> return $ VBase (x + y))
+    onfp n = return ()
 
 evalRecFunction :: Assertion
 evalRecFunction = runIdentity (addEvalLeet expr) @?= VBase 3

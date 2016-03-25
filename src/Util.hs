@@ -53,16 +53,18 @@ promptForParam ref = do
             Nothing -> putStrLn "Invalid number, try again!" >> getInt
 
 data ReachabilityResult = 
-    FPVerifiable | FPUnverifiable Int | FPUnreachable Int
+    FPVerifiable Int | FPUnverifiable Int | FPUnreachable (Maybe Int)
 
 data ReassocResult = ReassocApplied ReassocType | ReassocFail | ReassocNotAttempted
 
 data ReassocType = LeftAssoc | RightAssoc 
 
 instance Show ReachabilityResult where
-    show FPVerifiable       = "Fixed point reached and system can be globally verified."
+    show (FPVerifiable n)   = "Fixed point reached for n = " ++ show n ++ " and system can be globally verified."
     show (FPUnverifiable n) = "Fixed point reached, but reachability fails for n = " ++ show n
-    show (FPUnreachable n)  = "Fixed point could not be reached for n = " ++ show n
+    show (FPUnreachable n)  = case n of
+        (Just val) -> "Fixed point could not be reached for n = " ++ show val
+        Nothing    -> "Fixed point could not be reached"
 
 instance Show ReassocResult where
     show (ReassocApplied a)  = "Reassociation has been applied. The new tree is " ++ show a

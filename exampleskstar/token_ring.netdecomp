@@ -30,5 +30,5 @@ TRANS { {input, output}, {gotToken>, output} }
 
 WIRING
 IMPORT id, eta, epsilon
-bind procs = n_sequence read readyProcess in
+bind procs = readyProcess ** in
 eta ; (id * (procs ; injectToken)) ; epsilon

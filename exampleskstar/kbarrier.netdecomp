@@ -1,0 +1,55 @@
+NET kbarrier
+PLACES [ <init, 1, 0>
+       , <one, 0, 0>
+       , <two, 0, 0>
+       , <three, 0, 0> 
+       , <four, 0, *> 
+       ]
+LBOUNDS []
+RBOUNDS [signin, go]
+TRANS { {init>, signin, >one}
+      , {one>, signin, >two}
+      , {two>, signin, >three}
+      , {three>, signin, >four}
+      , {four?, signin}
+      , {four?, go}
+      }
+
+NET proc 
+PLACES [ <prep, 1, 0>
+       , <ready, 0, *>
+       , <exec, 0, *>
+       ]
+LBOUNDS [signin, go]
+RBOUNDS []
+TRANS { {prep>, signin, >ready}
+      , {ready>, go, >exec}
+      }
+
+NET choice
+PLACES []
+LBOUNDS [in]
+RBOUNDS [out1, out2]
+TRANS { {in, out1}, {in, out2} }
+
+NET mixconn
+PLACES []
+LBOUNDS [in1, in2, in3, in4]
+RBOUNDS [out1, out2, out3, out4]
+TRANS { {in1, out1}, {in2, out3}, {in3, out2}, {in4, out4} }
+
+NET rightend2
+PLACES []
+LBOUNDS [consume1, consume2]
+RBOUNDS []
+TRANS { {consume1},  {consume2}}
+
+WIRING
+IMPORT id2
+bind choiceproc = (choice * choice) ; mixconn ; (proc * id2) in 
+-- bind procs = n_sequence read choiceproc in
+-- kbarrier ; procs ; rightend2
+-- bind procs = starcase read rightend2 (\x : Net 2 0 . choiceproc ; x) in
+-- kbarrier ; procs
+bind procs = starcase read kbarrier (\x : Net 0 2 . x ; choiceproc) in 
+procs ; rightend2

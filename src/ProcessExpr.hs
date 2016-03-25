@@ -275,40 +275,40 @@ expr2NFAWFP :: IO Int -> Expr NFAWithBounds
          -> IO (ReachabilityResult, ReassocResult)
 expr2NFAWFP getP expr = do
     param <- getP
-    reachRes <- makeProof expr param True
+    reachRes <- makeProof expr param Nothing True
     case reachRes of 
-        FPVerifiable -> return (reachRes, ReassocNotAttempted)
+        (FPVerifiable _) -> return (reachRes, ReassocNotAttempted)
         _            -> do
             let assocExpr = reassocExpr expr
             case assocExpr of 
                 (nexpr, ReassocApplied a) -> do
-                    reachRes' <- makeProof nexpr param True
+                    reachRes' <- makeProof nexpr param Nothing True
                     return (reachRes', ReassocApplied a)
                 (_, ReassocFail)        -> return (reachRes, ReassocFail)
   where
-    makeProof expr' n maxIter =  do
+    makeProof expr' n fp maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
-        -- TODO try putting the first let in top level function
         let (numberedExpr, nfas) =
                 runState (traverse initialNumbering expr') (0, [])
             initState = MemoState initCounters nfas M.empty HM.empty False Nothing
             getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
         case n of 
-            1 -> do
+            1 -> do 
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
                 let nfa = nfaReachability $ fst evalRes
-                case nfa of 
-                    True -> return FPVerifiable
-                    False -> return (FPUnverifiable n)
+                case (nfa, fp) of 
+                    (True, Just p) -> return (FPVerifiable p)
+                    (True, Nothing) -> return (FPUnreachable Nothing)
+                    (False, _) -> return (FPUnverifiable n)
             _ -> do
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
                 let nfa = nfaReachability $ fst evalRes
                     counts = snd evalRes
                 case (maxIter, nfa, counts) of 
-                    (True, _, (_, _, False, _)) -> return (FPUnreachable n)
+                    (True, _, (_, _, False, _)) -> return (FPUnreachable (Just n))
                     (_, False, _)               -> return (FPUnverifiable n)
-                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p False)
-                    _                           -> makeProof expr' (n - 1) False
+                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p (Just p) False)
+                    _                           -> makeProof expr' (n - 1) fp False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 

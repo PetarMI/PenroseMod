@@ -47,5 +47,5 @@ TRANS
 WIRING
 IMPORT id2
 bind phfk = ph ; fk in
-bind phfks = n_sequence read phfk in
+bind phfks = phfk ** in
 lend ; (id2 * phfks) ; rend

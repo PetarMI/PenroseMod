@@ -36,5 +36,5 @@ TRANS
     }
 
 WIRING
-bind counters = n_sequence read counter ; counterTerm in
+bind counters = counter ** ; counterTerm in
 tester ; counters

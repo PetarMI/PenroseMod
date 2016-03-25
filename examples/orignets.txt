@@ -1,0 +1,368 @@
+barrier.netdecomp
+Bind
+  Sequence composition
+    Constant
+    Tensor product
+      Constant
+      Precomputed
+  Bind
+    Bind
+      Blargh
+      Bind
+        Variable
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Sequence composition
+      Sequence composition
+        Precomputed
+        Tensor product
+          Sequence composition
+            Sequence composition
+              Constant
+              Variable
+            Constant
+          Precomputed
+      Precomputed
+
+False
+****************************************
+buffer-slow.netdecomp
+Sequence composition
+  IntCase
+    Constant
+    Lambda
+      Sequence composition
+        Variable
+        Constant
+  Constant
+
+False
+****************************************
+buffer.netdecomp
+Sequence composition
+  Constant
+  IntCase
+    Constant
+    Lambda
+      Sequence composition
+        Constant
+        Variable
+
+False
+****************************************
+clique.netdecomp
+Bind
+  IntCase
+    Constant
+    Lambda
+      Sequence composition
+        Constant
+        Variable
+  Sequence composition
+    Sequence composition
+      Sequence composition
+        Constant
+        Constant
+      Variable
+    Constant
+
+False
+****************************************
+counter.netdecomp
+Bind
+  Sequence composition
+    Bind
+      Blargh
+      Bind
+        Constant
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Constant
+  Sequence composition
+    Constant
+    Variable
+
+False
+****************************************
+counter_simple.netdecomp
+Sequence composition
+  Constant
+  IntCase
+    Constant
+    Lambda
+      Sequence composition
+        Constant
+        Variable
+
+False
+****************************************
+cyclic.netdecomp
+Bind
+  Sequence composition
+    Constant
+    Tensor product
+      Constant
+      Precomputed
+  Bind
+    Bind
+      Blargh
+      Bind
+        Variable
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Sequence composition
+      Sequence composition
+        Sequence composition
+          Precomputed
+          Tensor product
+            Constant
+            Precomputed
+        Tensor product
+          Variable
+          Precomputed
+      Precomputed
+
+False
+****************************************
+dac.netdecomp
+Sequence composition
+  Sequence composition
+    Constant
+    Bind
+      Blargh
+      Bind
+        Constant
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+  Constant
+
+False
+****************************************
+hartstone.netdecomp
+Bind
+  Sequence composition
+    Sequence composition
+      Precomputed
+      Constant
+    Tensor product
+      Constant
+      Precomputed
+  Bind
+    Bind
+      Blargh
+      Bind
+        Variable
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Sequence composition
+      Sequence composition
+        Precomputed
+        Tensor product
+          Sequence composition
+            Constant
+            Variable
+          Precomputed
+      Precomputed
+
+False
+****************************************
+iterated_choice.netdecomp
+Bind
+  Sequence composition
+    Constant
+    Constant
+  Bind
+    IntCase
+      Constant
+      Lambda
+        Sequence composition
+          Variable
+          Variable
+    Sequence composition
+      Constant
+      Variable
+
+False
+****************************************
+kbarrier.netdecomp
+Bind
+  Sequence composition
+    Sequence composition
+      Tensor product
+        Constant
+        Constant
+      Constant
+    Tensor product
+      Constant
+      Precomputed
+  Sequence composition
+    IntCase
+      Constant
+      Lambda
+        Sequence composition
+          Variable
+          Variable
+    Constant
+
+False
+****************************************
+latch.netdecomp
+Bind
+  Sequence composition
+    Constant
+    Tensor product
+      Constant
+      Precomputed
+  Bind
+    Bind
+      Blargh
+      Bind
+        Variable
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Sequence composition
+      Sequence composition
+        Constant
+        Variable
+      Constant
+
+False
+****************************************
+over.netdecomp
+Bind
+  Sequence composition
+    Sequence composition
+      Constant
+      Constant
+    Constant
+  Bind
+    Sequence composition
+      Variable
+      Constant
+    Sequence composition
+      Constant
+      IntCase
+        Sequence composition
+          Variable
+          Constant
+        Lambda
+          Sequence composition
+            Variable
+            Variable
+
+False
+****************************************
+philo.netdecomp
+Bind
+  Sequence composition
+    Constant
+    Constant
+  Bind
+    Bind
+      Blargh
+      Bind
+        Variable
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+    Sequence composition
+      Sequence composition
+        Constant
+        Tensor product
+          Precomputed
+          Variable
+      Constant
+
+False
+****************************************
+replicator.netdecomp
+Bind
+  Bind
+    Blargh
+    Bind
+      Constant
+      IntCase
+        Variable
+        Lambda
+          Sequence composition
+            Variable
+            Variable
+  Sequence composition
+    Sequence composition
+      Constant
+      Variable
+    Constant
+
+False
+****************************************
+subsets.netdecomp
+Sequence composition
+  Sequence composition
+    Constant
+    Bind
+      Blargh
+      Bind
+        Constant
+        IntCase
+          Variable
+          Lambda
+            Sequence composition
+              Variable
+              Variable
+  Constant
+
+False
+****************************************
+token_ring.netdecomp
+Bind
+  Bind
+    Blargh
+    Bind
+      Constant
+      IntCase
+        Variable
+        Lambda
+          Sequence composition
+            Variable
+            Variable
+  Sequence composition
+    Sequence composition
+      Precomputed
+      Tensor product
+        Precomputed
+        Sequence composition
+          Variable
+          Constant
+    Precomputed
+
+False
+****************************************
+token_ring_simple.netdecomp
+****************************************

@@ -45,5 +45,5 @@ TRANS { {tok>, out}
 WIRING
 IMPORT id, eta, epsilon
 bind schedTask = scheduler ; (task * id) in
-bind tasks = n_sequence read schedTask in
+bind tasks = schedTask ** in
 eta ; (injector * id) ; (tasks * id) ; epsilon
