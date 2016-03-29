@@ -319,57 +319,65 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             checkTypeConstraint $ TCEquality t2 t4
         _ -> die $ IncompatableTypes ty1 ty2
 
-reassocExpr :: Expr t -> (Expr t, ReassocResult)
+reassocExpr :: (Show t) => Expr t -> (Expr t, ReassocResult)
 reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
   where 
-    reassocExpr' :: Expr t -> ReassocResult -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
-    reassocExpr' expr' reassoc boundExprs = case expr' of
-        (ENum n) -> (ENum n, reassoc, boundExprs)
-        ERead    -> (ERead, reassoc, boundExprs)
-        (EBin op x y) -> (EBin op x y, reassoc, boundExprs)
-        (EIntCase n term f) -> (EIntCase n term f, reassoc, boundExprs)
-        (EStarCase n term f offset) -> (EStarCase n term f offset, reassoc, boundExprs)
-        (EPreComputed pc) -> (EPreComputed pc, reassoc, boundExprs)
-        (EConstant c) -> (EConstant c, reassoc, boundExprs)
+    reassocExpr' :: (Show t) => Expr t -> ReassocResult -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
+    reassocExpr' expr' reassoc env = case expr' of
+        (ENum n) -> (ENum n, reassoc, env)
+        ERead    -> (ERead, reassoc, env)
+        (EBin op x y) -> (EBin op x y, reassoc, env)
+        (EIntCase n term f) -> (EIntCase n term f, reassoc, env)
+        (EStarCase n term f offset) -> (EStarCase n term f offset, reassoc, env)
+        (EPreComputed pc) -> (EPreComputed pc, reassoc, env)
+        (EConstant c) -> (EConstant c, reassoc, env)
         (ESeq t1 t2) -> 
-            let (nexpr, reassoc1, boundExprs') = reassocSequence (ESeq t1 t2) boundExprs
-            in (nexpr, reassoc <||> reassoc1, boundExprs')
+            let (nexpr, reassoc1, env') = reassocSequence (ESeq t1 t2) env
+            in (nexpr, reassoc <||> reassoc1, env')
         (ETen t1 t2) -> 
-            let (et1, reassoc1, boundExprs1) = reassocExpr' t1 reassoc boundExprs
-                (et2, reassoc2, boundExprs2) = reassocExpr' t2 reassoc boundExprs
-            in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2, boundExprs)
-        (EVar v) -> (EVar v, reassoc, boundExprs)
+            let (et1, reassoc1, env1) = reassocExpr' t1 reassoc env
+                (et2, reassoc2, env2) = reassocExpr' t2 reassoc env
+            in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2, env)
+        (EVar v) -> (EVar v, reassoc, env)
         (EApp f param) ->  
-            let (f', reassoc1, boundExprs1) = reassocExpr' f reassoc boundExprs
-                (param', reassoc2, boundExprs2) = reassocExpr' param reassoc boundExprs
-            in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2, boundExprs)
+            let (f', reassoc1, env1) = reassocExpr' f reassoc env
+                (param', reassoc2, env2) = reassocExpr' param reassoc env
+            in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2, env)
         (ELam body) -> 
-            let (body', reassoc1, boundExprs') = reassocExpr' body reassoc boundExprs
-            in (ELam body', reassoc <||> reassoc1, boundExprs')
+            let (body', reassoc1, env') = reassocExpr' body reassoc env
+            in (ELam body', reassoc <||> reassoc1, env')
         (EBind e1 body) -> 
-            let (e1', reassoc1, boundExprs1) = reassocExpr' e1 reassoc boundExprs
-                (body', reassoc2, boundExprs2) = reassocExpr' body reassoc (e1 : boundExprs)
-            in (EBind (head boundExprs2) body', reassoc <||> reassoc1 <||> reassoc2, (tail boundExprs2))
+            let (e1', reassoc1, env1) = reassocExpr' e1 reassoc env
+                (body', reassoc2, env2) = reassocExpr' body reassoc (e1 : env)
+            in (EBind (head env2) body', reassoc <||> reassoc1 <||> reassoc2, (tail env2))
 
-    reassocSequence :: Expr t -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
-    reassocSequence expr' boundExprs = case expr' of 
-        (ESeq e (EStarCase n term (ELam (ESeq t1 t2)) offset)) -> 
-                ((ESeq (EStarCase n e (ELam (ESeq t2 t1)) offset) term), (ReassocApplied LeftAssoc), boundExprs) 
-        (ESeq (EStarCase n term (ELam (ESeq t1 t2)) offset) e) -> 
-                ((ESeq term (EStarCase n e (ELam (ESeq t2 t1)) offset)), (ReassocApplied RightAssoc), boundExprs)
-        (ESeq const' (EVar v)) -> 
-            let (intCase, term, reassocRes) = reassocIntCase (EVar v) const' RightAssoc boundExprs
-                boundExprs' = substitudeIntCase intCase (varToInt v) boundExprs
+    reassocSequence :: (Show t) => Expr t -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
+    reassocSequence expr' env = case expr' of 
+        (ESeq e (EStarCase n term (ELam (ESeq t1 (EVar v))) offset)) -> 
+                ((ESeq (EStarCase n e (ELam (ESeq (EVar v) t1)) offset) term), (ReassocApplied LeftAssoc), env) 
+        (ESeq (EStarCase n term (ELam (ESeq (EVar v) t2)) offset) e) -> 
+                ((ESeq term (EStarCase n e (ELam (ESeq t2 (EVar v))) offset)), (ReassocApplied RightAssoc), env)
+        (ESeq (EVar v1) (EVar v2)) ->
+            let (EVar fold, EVar v, assoc) = findAssociation (EVar v1) (EVar v2) env
+                (intCase, term, reassocRes) = reassocIntCase (EVar fold) (EVar v) assoc env
+                env' = substitudeIntCase intCase (varToInt fold) env
+            in case (reassocRes, assoc) of 
+                (ReassocApplied a, RightAssoc) -> ((ESeq (EVar fold) term), reassocRes, env')
+                (ReassocApplied a, LeftAssoc) -> ((ESeq term (EVar fold)), reassocRes, env')
+                (ReassocFail, _) -> (expr', reassocRes, env)
+        (ESeq operand (EVar v)) -> 
+            let (intCase, term, reassocRes) = reassocIntCase (EVar v) operand RightAssoc env
+                env' = substitudeIntCase intCase (varToInt v) env
             in case reassocRes of 
-                (ReassocApplied a) -> ((ESeq (EVar v) term), reassocRes, boundExprs')
-                ReassocFail -> ((ESeq const' (EVar v)), reassocRes, boundExprs)
-        (ESeq (EVar v) const') -> 
-            let (intCase, term, reassocRes) = reassocIntCase (EVar v) const' LeftAssoc boundExprs
-                boundExprs' = substitudeIntCase intCase (varToInt v) boundExprs
+                (ReassocApplied a) -> ((ESeq (EVar v) term), reassocRes, env')
+                ReassocFail -> (expr', reassocRes, env)
+        (ESeq (EVar v) operand) -> 
+            let (intCase, term, reassocRes) = reassocIntCase (EVar v) operand LeftAssoc env
+                env' = substitudeIntCase intCase (varToInt v) env
             in case reassocRes of 
-                (ReassocApplied a) -> ((ESeq term (EVar v)), reassocRes, boundExprs')
-                ReassocFail -> ((ESeq (EVar v) const'), reassocRes, boundExprs)
-        _ -> (expr', ReassocFail, boundExprs)
+                (ReassocApplied a) -> ((ESeq term (EVar v)), reassocRes, env')
+                ReassocFail -> (expr', reassocRes, env)
+        _ -> (expr', ReassocFail, env)
 
     -- 1st arg - the variable that we resolve
     -- 2nd arg - constant that will go in the lambda
@@ -380,20 +388,70 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
     --    the term from the lambda that becomes an arg in the sequence composition 
     --    has association been applied
     reassocIntCase :: Expr t -> Expr t -> ReassocType -> [Expr t] -> (Expr t, Expr t, ReassocResult)
-    reassocIntCase (EVar v) const' assocType boundExprs = 
-        let varExpr = boundExprs !! varToInt v
+    reassocIntCase (EVar v) operand assocType env = 
+        let varExpr = env !! varToInt v
         in case (varExpr, assocType) of
             ((EStarCase n term (ELam (ESeq t (EVar v'))) offset), RightAssoc) -> 
-                ((EStarCase n const' (ELam (ESeq (EVar v') t)) offset), term, (ReassocApplied LeftAssoc))
+                let noperand = (offsetVar term env)
+                    (nterm, bindOk) = (offsetOperand operand (EVar v))
+                in case bindOk of 
+                    True -> ((EStarCase n nterm (ELam (ESeq (EVar v') t)) offset), noperand, (ReassocApplied LeftAssoc))
+                    False -> ((EVar v), operand, ReassocFail)
             ((EStarCase n term (ELam (ESeq (EVar v') t)) offset), LeftAssoc) ->
-                ((EStarCase n const' (ELam (ESeq t (EVar v'))) offset), term, (ReassocApplied RightAssoc))
-            _ -> ((EVar v), const', ReassocFail)
+                let noperand = (offsetVar term env)
+                    (nterm, bindOk) = (offsetOperand operand (EVar v))
+                in case bindOk of 
+                    True -> ((EStarCase n nterm (ELam (ESeq t (EVar v'))) offset), noperand, (ReassocApplied RightAssoc))
+                    False -> ((EVar v), operand, ReassocFail)
+            _ -> ((EVar v), operand, ReassocFail)
     reassocIntCase _ _ _ _ = error "Error while reassociating IntCase"
 
     substitudeIntCase :: Expr t -> Int -> [Expr t] -> [Expr t]
     substitudeIntCase intCase 0 (x:xs) = (intCase : xs)
     substitudeIntCase intCase n (x:xs) = x : (substitudeIntCase intCase (n - 1) xs)
     substitudeIntCase _ _ []           = error "Error while reassociating variable binding"
+
+    findAssociation :: Expr t -> Expr t -> [Expr t] -> (Expr t, Expr t, ReassocType)
+    findAssociation (EVar v1) (EVar v2) env = 
+        let varExpr1 = env !! varToInt v1
+            varExpr2 = env !! varToInt v2
+        in case (varExpr1, varExpr2) of
+            (EStarCase _ _ _ _, _) -> ((EVar v1), (EVar v2), LeftAssoc)
+            (_, EStarCase _ _ _ _) -> ((EVar v2), (EVar v1), RightAssoc)
+            _                      -> error "Error while searching for a bound StarCase"
+
+    offsetVar :: Expr t -> [Expr t] -> Expr t
+    offsetVar expr' env = case expr' of 
+        (EVar (VarId n)) -> 
+            let foldPos = findFold env 
+            in (EVar (VarId (n + foldPos + 1)))
+        _                -> expr'
+
+    -- function to offset the operand in the sequence operation
+    -- and put it within the fold with pointing to the correct binding
+    -- the operand thus becomes the new term in the fold
+    offsetOperand :: Expr t -> Expr t -> (Expr t, Bool)
+    offsetOperand (EVar operand) (EVar fold) = 
+        let operandPos = varToInt operand
+            foldPos    = varToInt fold
+        in if operandPos > foldPos
+                then (EVar . VarId $ (operandPos - foldPos - 1), True)
+                else (EVar operand, False)
+    offsetOperand op fold = (op, True)
+
+    substitudeVar :: Expr t -> [Expr t] -> Expr t
+    substitudeVar expr env = case expr of 
+        (EVar (VarId n)) -> (env !! (n + 1))
+        _                -> expr
+
+    findFold :: [Expr t] -> Int
+    findFold env = findFold' env 0
+        where
+            findFold' :: [Expr t] -> Int -> Int
+            findFold' [] n = error "No EStarCase found"
+            findFold' (op : es) n = case op of 
+                (EStarCase _ _ _ _) -> n
+                _                   -> findFold' es (n + 1)
 
     takeExpr res = case res of 
         (expr', reassocRes, _) -> (expr', reassocRes)

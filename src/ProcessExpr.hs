@@ -229,7 +229,7 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
                                 app <- eval (EApp f (EPreComputed resExpr)) env
                                 if app == res 
                                     then do 
-                                        onFP . offsettFixedPoint i' $ fromValueInt fpOffset
+                                        onFP . offsetFixedPoint i' $ fromValueInt fpOffset
                                         return (False, app) 
                                     else 
                                         return (True, app)
@@ -248,11 +248,11 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
     fromValue (VBase p) = p
     fromValue _ = error "Non-base type" 
 
-    offsettFixedPoint :: Int -> Int -> Int
-    offsettFixedPoint n 0 = n
-    offsettFixedPoint 1 1 = 1
-    offsettFixedPoint n 1 = n - 1
-    offsettFixedPoint _ _ = error "Error in offsetting the fixed point"
+    offsetFixedPoint :: Int -> Int -> Int
+    offsetFixedPoint n 0 = n
+    offsetFixedPoint 1 1 = 1
+    offsetFixedPoint n 1 = n - 1
+    offsetFixedPoint _ _ = error "Error in offsetting the fixed point"
 
     -- used for the offsetting
     fromValueInt (VInt p) = p

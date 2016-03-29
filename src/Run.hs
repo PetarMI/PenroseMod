@@ -178,7 +178,7 @@ getLibraryContents dir = do
 
 -- function for the extra mode
 -- we only need the expression produced by the typechecker 
-convertExpr :: Expr t -> IO (Expr t, String)
+convertExpr :: (Show t) => Expr t -> IO (Expr t, String)
 convertExpr expr = return (second show (reassocExpr expr))
 
 

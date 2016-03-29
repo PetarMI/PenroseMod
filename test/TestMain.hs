@@ -46,7 +46,7 @@ import NFA ( NFA(..), toNFAWithMarking, subsetConstruction, toNFA
            , NFAWithBoundaries(..), epsilonSubsetConstruction, notInConflict
            , epsMinimise, tensor, epsBisimEquiv, epsilonCloseNFA, modifyNFAWB
            , quotientByPartition, renumberNFA, equivalenceHKC, BoundarySide(..)
-           , commonSharedBDD, BoundaryPos(..) )
+           , commonSharedBDD, BoundaryPos(..), nfaReachability )
 import PEP ( llNet2Dot )
 import qualified NFA ( compose )
 import NFAGen ()
@@ -59,9 +59,10 @@ import DSL.ComponentsAndWiringParser ( ComponentsAndWiring(..)
                                      , WiringDefinition(..) )
 import DSL.ProcessParse ( lookupNames )
 import DSL.RawExprParser ( parseRawExpr )
-import DSL.Expr ( Type(..), checkType, Value(..), Expr(..), VarId(..), BinOp(..), TypeCheckError(..) )
+import DSL.Expr ( Type(..), checkType, Value(..), Expr(..), VarId(..), BinOp(..)
+                , TypeCheckError(..), reassocExpr )
 
-import Util ( unlines )
+import Util ( unlines, ReassocResult(..), ReassocType(..), (<||>) )
 import Prelude hiding ( unlines )
 
 main = do
@@ -217,6 +218,37 @@ tests =
     , testGroup "To strings"
         [ testCase "simple to DotNet" simpleDotNet
         , testCase "simple to LOLANet" simpleLOLANet
+        ]
+    , testGroup "Reassociations"
+        [ testCase "ReassociationsOr1" reassocOr1
+        , testCase "ReassociationsOr2" reassocOr2
+        , testCase "ReassociationsOr3" reassocOr3
+        , testCase "ReassociationsOr4" reassocOr4
+        , testCase "ReassociationsOr5" reassocOr5
+        , testCase "ReassociationsLeft" reassocLeft
+        , testCase "ReassociationsRight" reassocRight
+        , testCase "ReassociationsLeftVar" reassocLeftVar
+        , testCase "ReassociationsRightVar" reassocRightVar
+        , testCase "ReassociationsLeftVarNestedSequence" reassocVarNestedSeq
+        , testCase "ReassociationsRightVarNestedLambda" reassocVarNestedLam
+        , testCase "ReassociationsRightVarNestedBoth" reassocVarNestedBoth
+        , testCase "ReassociationsNestedExtraVars" reassocVarNestedExtra
+        , testCase "ReassociationsFail1" reassocResultFail1
+        , testCase "ReassociationsFail2" reassocResultFail2
+        , testCase "ReassociationsFail3" reassocResultFail3
+        , testCase "ReassociationsFail4" reassocResultFail4
+        , testCase "ReassociationsFail5"  reassocResultFail5
+        ]
+    , testGroup "Fixed points and evaluation"
+        [ testCase "NFAReachability1" nfaReachability1
+        , testCase "NFAReachability2" nfaReachability2
+        , testCase "NFAReachability3" nfaReachability3
+        , testCase "NFAReachability4" nfaReachability4
+        , testCase "NFAReachability5" nfaReachability5
+        , testCase "NFAReachability6" nfaReachability6
+        , testCase "Recursive function NSequence" evalRecFunctionNSeq
+        , testCase "FoldEvaluationStarCase" evalFoldVsStarCase 
+        , testCase "FoldEvaluationKStar" evalFoldVsKStar   
         ]
     ]
 
@@ -2195,6 +2227,379 @@ typeChecking14 = doTypeCheck input nameMap expectedOr
 
     expectedOr = Left "InvalidCompose 2 2 1 0"
 
+reassocOr1 :: Assertion
+reassocOr1 = reassocRes @?= (ReassocApplied LeftAssoc)
+    where
+        reassocRes = (ReassocApplied LeftAssoc) <||> (ReassocApplied LeftAssoc)
+
+reassocOr2 :: Assertion
+reassocOr2 = reassocRes @?= (ReassocApplied RightAssoc)
+    where
+        reassocRes = (ReassocApplied RightAssoc) <||> ReassocFail
+
+reassocOr3 :: Assertion
+reassocOr3 = reassocRes @?= (ReassocApplied LeftAssoc)
+    where
+        reassocRes = ReassocFail <||> (ReassocApplied LeftAssoc)
+
+reassocOr4 :: Assertion
+reassocOr4 = reassocRes @?= ReassocFail
+    where
+        reassocRes = ReassocFail <||> ReassocFail
+
+reassocOr5 :: Assertion
+reassocOr5 = reassocRes @?= ReassocFail
+    where
+        reassocRes = ReassocNotAttempted <||> ReassocFail
+
+
+reassocLeft :: Assertion 
+reassocLeft = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
+    where 
+        expr = EBind (EPreComputed (1, 1))
+                     (ESeq (EStarCase 
+                               ERead
+                               (EPreComputed (0, 1))
+                               (ELam (ESeq (EVar (VarId 0))
+                                           (EVar (VarId 1))))
+                               (ENum 1))
+                           (EPreComputed (1, 0)))
+
+        expectedExpr = EBind (EPreComputed (1, 1))
+                             (ESeq (EPreComputed (0, 1)) 
+                                   (EStarCase 
+                                       ERead
+                                       (EPreComputed (1, 0))
+                                       (ELam (ESeq (EVar (VarId 1))
+                                                   (EVar (VarId 0))))
+                                       (ENum 1)))
+
+        reassocRes = reassocExpr expr
+
+reassocRight :: Assertion 
+reassocRight = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
+    where 
+        expr = EBind (EPreComputed (1, 1))
+                     (ESeq (EPreComputed (0, 1)) 
+                           (EStarCase 
+                               ERead
+                               (EPreComputed (1, 0))
+                               (ELam (ESeq (EVar (VarId 1))
+                                           (EVar (VarId 0))))
+                               (ENum 1)))
+
+        expectedExpr = EBind (EPreComputed (1, 1))
+                             (ESeq (EStarCase 
+                                       ERead
+                                       (EPreComputed (0, 1))
+                                       (ELam (ESeq (EVar (VarId 0))
+                                                   (EVar (VarId 1))))
+                                       (ENum 1))
+                                   (EPreComputed (1, 0)))
+
+        reassocRes = reassocExpr expr
+
+reassocLeftVar :: Assertion
+reassocLeftVar = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
+    where
+        expr = EBind (EStarCase
+                        ERead
+                        (EPreComputed (0, 1))
+                        (ELam (ESeq (EVar (VarId 0))
+                                    (EPreComputed (1, 1))))
+                        (ENum 1))
+                     (ESeq (EVar (VarId 0))
+                           (EPreComputed (1, 0)))
+
+        expectedExpr = EBind (EStarCase 
+                                ERead
+                                (EPreComputed (1, 0))
+                                (ELam (ESeq (EPreComputed (1, 1))
+                                            (EVar (VarId 0))))
+                                (ENum 1))
+                             (ESeq (EPreComputed (0, 1))
+                                   (EVar (VarId 0)))
+
+        reassocRes = reassocExpr expr
+
+reassocRightVar :: Assertion
+reassocRightVar = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
+    where
+        expr = EBind (EStarCase 
+                        ERead
+                        (EPreComputed (1, 0))
+                        (ELam (ESeq (EPreComputed (1, 1))
+                                    (EVar (VarId 0))))
+                        (ENum 1))
+                     (ESeq (EPreComputed (0, 1))
+                           (EVar (VarId 0)))
+
+        expectedExpr = EBind (EStarCase
+                                ERead
+                                (EPreComputed (0, 1))
+                                (ELam (ESeq (EVar (VarId 0))
+                                            (EPreComputed (1, 1))))
+                                (ENum 1))
+                             (ESeq (EVar (VarId 0))
+                                   (EPreComputed (1, 0)))
+
+        reassocRes = reassocExpr expr
+
+reassocVarNestedSeq :: Assertion
+reassocVarNestedSeq = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
+    where
+        expr = EBind (EPreComputed (1, 0))
+                     (EBind (EStarCase
+                                ERead
+                                (EPreComputed (0, 1))
+                                (ELam (ESeq (EVar (VarId 0))
+                                            (EPreComputed (1, 1))))
+                                (ENum 1))
+                            (ESeq (EVar (VarId 0))
+                                  (EVar (VarId 1))))
+
+        expectedExpr = EBind (EPreComputed (1, 0))
+                             (EBind (EStarCase 
+                                        ERead
+                                        (EVar (VarId 0))
+                                        (ELam (ESeq (EPreComputed (1, 1))
+                                                    (EVar (VarId 0))))
+                                        (ENum 1))
+                                   (ESeq (EPreComputed (0, 1))
+                                         (EVar (VarId 0))))
+
+        reassocRes = reassocExpr expr
+
+reassocVarNestedLam :: Assertion
+reassocVarNestedLam = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
+    where
+        expr = EBind (EPreComputed (1, 0)) 
+                     (EBind (EStarCase 
+                                ERead
+                                (EVar (VarId 0))
+                                (ELam (ESeq (EPreComputed (1, 1))
+                                            (EVar (VarId 0))))
+                                (ENum 1))
+                            (ESeq (EPreComputed (0, 1))
+                                  (EVar (VarId 0))))
+
+        expectedExpr = EBind (EPreComputed (1, 0)) 
+                             (EBind (EStarCase 
+                                        ERead
+                                        (EPreComputed (0, 1))
+                                        (ELam (ESeq (EVar (VarId 0))
+                                                    (EPreComputed (1, 1))))
+                                        (ENum 1))
+                                    (ESeq (EVar (VarId 0))
+                                          (EVar (VarId 1))))
+
+        reassocRes = reassocExpr expr
+
+reassocVarNestedBoth :: Assertion 
+reassocVarNestedBoth = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
+    where
+        expr = EBind (EPreComputed (1, 0))
+                     (EBind (EPreComputed (0, 1))
+                            (EBind (EStarCase 
+                                        ERead
+                                        (EVar (VarId 0))
+                                        (ELam (ESeq (EVar (VarId 0))
+                                                    (EPreComputed (1, 1))))
+                                        (ENum 1))
+                                    (ESeq (EVar (VarId 0))
+                                          (EVar (VarId 2)))))
+
+        expectedExpr = EBind (EPreComputed (1, 0))
+                             (EBind (EPreComputed (0, 1))
+                                    (EBind (EStarCase 
+                                               ERead
+                                               (EVar (VarId 1))
+                                               (ELam (ESeq (EPreComputed (1, 1))
+                                                           (EVar (VarId 0))))
+                                               (ENum 1))
+                                            (ESeq (EVar (VarId 1))
+                                                  (EVar (VarId 0)))))
+
+        reassocRes = reassocExpr expr
+
+reassocVarNestedExtra :: Assertion 
+reassocVarNestedExtra = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
+    where
+        expr = EBind (EPreComputed (1, 0))
+                     (EBind (EPreComputed (0, 1))
+                            (EBind (EPreComputed (0, 0))
+                                    (EBind (EStarCase 
+                                                ERead
+                                                (EVar (VarId 1))
+                                                (ELam (ESeq (EVar (VarId 0))
+                                                            (EPreComputed (1, 1))))
+                                                (ENum 1))
+                                            (EBind (EPreComputed (0, 0))
+                                                   (ESeq (EVar (VarId 1))
+                                                         (EVar (VarId 4)))))))
+
+        expectedExpr = EBind (EPreComputed (1, 0))
+                             (EBind (EPreComputed (0, 1))
+                                    (EBind (EPreComputed (0, 0))
+                                        (EBind (EStarCase 
+                                                   ERead
+                                                   (EVar (VarId 2))
+                                                   (ELam (ESeq (EPreComputed (1, 1))
+                                                               (EVar (VarId 0))))
+                                                   (ENum 1))
+                                                (EBind (EPreComputed (0, 0))
+                                                       (ESeq (EVar (VarId 3))
+                                                             (EVar (VarId 1)))))))
+
+        reassocRes = reassocExpr expr
+
+reassocResultFail1 :: Assertion 
+reassocResultFail1 = reassocRes @?= (expr, ReassocFail)
+    where
+        expr = EBind (EPreComputed (1, 1))
+                     (ETen (EVar (VarId 0))
+                           (EVar (VarId 1)))
+
+        reassocRes = reassocExpr expr
+
+reassocResultFail2 :: Assertion
+reassocResultFail2 = reassocRes @?= (expr, ReassocFail)
+    where 
+        expr = EBind (EStarCase
+                        ERead
+                        (EPreComputed (1, 1))
+                        (ELam (ETen (EVar (VarId 0))
+                                   (EPreComputed (2, 2))))
+                        (ENum 0))
+                     (ESeq (EVar (VarId 0))
+                           (EPreComputed (3, 1)))
+
+        reassocRes = reassocExpr expr
+
+reassocResultFail3 :: Assertion
+reassocResultFail3 = reassocRes @?= (expr, ReassocFail)
+    where 
+        expr = EBind ERead
+                     (ESeq (EStarCase 
+                               (EVar (VarId 0))
+                               (EPreComputed (2, 1))
+                               (ELam (ESeq (EPreComputed (2, 2))
+                                           (EVar (VarId 0))))
+                               (ENum 1))
+                           (EPreComputed (1, 2)))
+
+        reassocRes = reassocExpr expr
+
+reassocResultFail4 :: Assertion
+reassocResultFail4 = reassocRes @?= (expr, ReassocFail)
+    where 
+        expr = EBind ERead
+                     (ESeq (EPreComputed (1, 2)) 
+                           (EStarCase 
+                               (EVar (VarId 0))
+                               (EPreComputed (1, 2))
+                               (ELam (ESeq (EVar (VarId 0))
+                                           (EPreComputed (2, 2))))
+                               (ENum 1)))
+
+        reassocRes = reassocExpr expr
+
+reassocResultFail5 :: Assertion
+reassocResultFail5 = reassocRes @?= (expr, ReassocFail)
+    where
+        expr = EBind (EStarCase
+                        ERead
+                        (EPreComputed (0, 1))
+                        (ELam (ESeq (EVar (VarId 0))
+                                    (EPreComputed (1, 1))))
+                        (ENum 1))
+                      (EBind (EPreComputed (1, 0))
+                             (ESeq (EVar (VarId 1))
+                                   (EVar (VarId 0))))
+
+        reassocRes = reassocExpr expr
+
+nfaReachability1 :: Assertion
+nfaReachability1 = reachCheck @?= True
+    where
+        nfa =
+            textToNFAWB [ "0"
+                        , "0--1/1->0"
+                        , "0"
+                        ]
+
+        reachCheck = nfaReachability nfa    
+        
+nfaReachability2 :: Assertion
+nfaReachability2 = reachCheck @?= True
+    where
+        nfa =
+            textToNFAWB [ "1"
+                        , "0--/000->0"
+                        , "0--/100->1"
+                        , "1--/000->1"
+                        , "1--/010->2"
+                        , "2--/000->2"
+                        , "2--/001->3"
+                        , "3--/000->3"
+                        , "4--/***->4"
+                        , "4"
+                        ]
+
+        reachCheck = nfaReachability nfa  
+
+nfaReachability3 :: Assertion
+nfaReachability3 = reachCheck @?= True
+    where
+        nfa =
+            textToNFAWB [ "0"
+                        , "0--00/00->0"
+                        , "0--11/11->0"
+                        , "0--10/10->1"
+                        , "0--01/01->1"
+                        , "0--11/11->1"
+                        , "1--00/00->1"
+                        , "1--01/11->1"
+                        , "0,1"
+                        ]
+
+        reachCheck = nfaReachability nfa  
+
+nfaReachability4 :: Assertion
+nfaReachability4 = reachCheck @?= False
+    where
+        nfa =
+            textToNFAWB [ "0"
+                        , "0--00/000,01/001,10/010,11/011->0"
+                        , "0--00/100,01/101,10/110,11/111->1"
+                        , "1--00/000,01/001,10/010,11/011->1"
+                        ]
+
+        reachCheck = nfaReachability nfa  
+
+nfaReachability5 :: Assertion
+nfaReachability5 = reachCheck @?= False
+    where
+        nfa =
+            textToNFAWB [ "0"
+                        , "0--1/1->0"
+                        , ""
+                        ]
+
+        reachCheck = nfaReachability nfa  
+
+nfaReachability6 :: Assertion
+nfaReachability6 = reachCheck @?= False
+    where
+        nfa =
+            textToNFAWB [ "0"
+                        , "0--00/000,01/001,10/010,11/011->0"
+                        , "0--00/100,01/101,10/110,11/111->1"
+                        , "1--00/000,01/001,10/010,11/011->1"
+                        ]
+
+        reachCheck = nfaReachability nfa             
+
 -- data BinOp = Add
 --            | Sub
 --            deriving (Eq, Show)
@@ -2234,6 +2639,30 @@ typeChecking14 = doTypeCheck input nameMap expectedOr
     --(VInt i) == (VInt j) = i == j
     --_ == _ = False
 
+instance Eq ReassocResult where
+    (ReassocApplied r1) == (ReassocApplied r2) = r1 == r2 
+    ReassocFail == ReassocFail                 = True
+    ReassocNotAttempted == ReassocNotAttempted = True
+    _ == _                                     = False
+
+{--instance (Eq p) => Eq (Expr p) where 
+    (EVar vid1) == (EVar vid2) = (varToInt vid1) == (varToInt vid2)
+    (ENum n1) == (ENum n2) = n1 == n2
+    ERead == ERead = True
+    (EIntCase n1 term1 f1) == (EIntCase n2 term2 f2) = 
+        (n1 == n2) && (term1 == term2) && (f1 == f2)
+    (EStarCase n1 term1 f1 off1) == (EStarCase n2 term2 f2 off2) = 
+        (n1 == n2) && (term1 == term2) && (f1 == f2) && (off1 == off2)
+    (EBin _ _ _) == (EBin _ _ _) = True
+    (EConstant _ ) == (EConstant _) = True
+    (EPreComputed p1) == (EPreComputed p2) = p1 == p2
+    (EApp f1 v1) == (EApp f2 v2) = (f1 == f2) && (v1 == v2)
+    (ELam b1) == (ELam b2) = b1 == b2
+    (EBind v1 b1) == (EBind v2 b2) = (v1 == v2) && (b1 == b2)
+    (ESeq t1) == (ESeq t2) = t1 == t2
+    (ETen t1) == (ETen t2) = t1 == t2
+    _ == _ = False--}
+
 
 addEvalLeet = exprEval (const . return $ 1337) add add onfp getParam
   where
@@ -2252,6 +2681,66 @@ evalRecFunction = runIdentity (addEvalLeet expr) @?= VBase 3
                     (EPreComputed 0)
                     (ELam (ESeq (EPreComputed 1) (EVar (VarId 0)))))
     body = EApp (EVar (VarId 0)) (ENum 3)
+
+evalRecFunctionNSeq :: Assertion
+evalRecFunctionNSeq = runIdentity (addEvalLeet expr) @?= VBase 4
+  where
+    -- bind f = \x . intcase x 0 (\p . 1 ; p)
+    -- in f 3
+    expr = EBind bind body
+    bind = ELam (EIntCase
+                    (EVar (VarId 0))
+                    (EPreComputed 1)
+                    (ELam (ESeq (EPreComputed 1) (EVar (VarId 0)))))
+    body = EApp (EVar (VarId 0)) (ENum 3)
+
+evalFoldVsStarCase :: Assertion
+evalFoldVsStarCase = kstarRes @?= foldRes
+  where
+        -- bind f = \x . intcase x 0 (\p . 1 ; p)
+        -- in f 3
+        foldExpr = EBind foldBind foldBody
+        foldBind = ELam (EIntCase
+                        (EVar (VarId 0))
+                        (EPreComputed 0)
+                        (ELam (ESeq (EPreComputed 1) (EVar (VarId 0)))))
+        foldBody = EApp (EVar (VarId 0)) (ENum 3)
+
+        foldRes = runIdentity (addEvalLeet foldExpr)
+
+        kstarExpr = EBind kstarBind kstarBody
+        kstarBind = ELam (EStarCase
+                        (EVar (VarId 0))
+                        (EPreComputed 0)
+                        (ELam (ESeq (EPreComputed 1) (EVar (VarId 0))))
+                        (ENum 1))
+        kstarBody = EApp (EVar (VarId 0)) (ENum 3)
+
+        kstarRes = runIdentity (addEvalLeet kstarExpr)
+
+evalFoldVsKStar :: Assertion
+evalFoldVsKStar = kstarRes @?= foldRes
+    where
+        -- bind f = \x . intcase x 0 (\p . 1 ; p)
+        -- in f 3
+        foldExpr = EBind foldBind foldBody
+        foldBind = ELam (EIntCase
+                        (EVar (VarId 0))
+                        (EPreComputed 1)
+                        (ELam (ESeq (EPreComputed 1) (EVar (VarId 0)))))
+        foldBody = EApp (EVar (VarId 0)) (ENum 3)
+
+        foldRes = runIdentity (addEvalLeet foldExpr)
+
+        kstarExpr = EBind kstarBind kstarBody
+        kstarBind = ELam (EStarCase
+                        (EVar (VarId 0))
+                        (EPreComputed 1)
+                        (ELam (ESeq (EPreComputed 1) (EVar (VarId 0))))
+                        (ENum 0))
+        kstarBody = EApp (EVar (VarId 0)) (ENum 3)
+
+        kstarRes = runIdentity (addEvalLeet kstarExpr)
 
 evalUnusedBind :: Assertion
 evalUnusedBind = runIdentity (addEvalLeet expr) @?= VBase 10

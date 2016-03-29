@@ -57,7 +57,7 @@ data ReachabilityResult =
 
 data ReassocResult = ReassocApplied ReassocType | ReassocFail | ReassocNotAttempted
 
-data ReassocType = LeftAssoc | RightAssoc 
+data ReassocType = LeftAssoc | RightAssoc deriving (Eq)
 
 instance Show ReachabilityResult where
     show (FPVerifiable n)   = "Fixed point reached for n = " ++ show n ++ " and system can be globally verified."
