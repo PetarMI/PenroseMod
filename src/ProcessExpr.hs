@@ -58,6 +58,7 @@ instance Hashable NFALang where
     -- Use the unique id as the (unique) hashcode
     hashWithSalt s (NFALang (WithId _ nfaId)) = hashWithSalt s nfaId
 
+-- important function that is indeirectly used for the fixed-point checking
 instance Eq NFALang where
     (NFALang (unWithId -> (NFAWithBoundaries nfa1 l1 r1, id1)))
         == (NFALang (unWithId -> (NFAWithBoundaries nfa2 l2 r2, id2)))
@@ -122,6 +123,8 @@ $(makeLenses ''Counters)
 --        reduced NFA if we match language.
 --     2. (Net, NFA): we only convert Nets once.
 --     3. (NFA, NFA, Op, NFA) only perform the binary operation on NFAs once
+-- also keep the fixed-point in case one is reached
+
 data MemoState = MemoState
     { _counters :: !Counters
     , _knownNFAs :: !(Int, [NFALang])
@@ -209,7 +212,9 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
 
     -- eval :: Expr r -> [Value m r] -> m (Value m r)
     --foldWFP :: Expr r -> Expr r -> Expr r -> [Value m r]
-    --   -> m (Bool, Value m r)         
+    --   -> m (Bool, Value m r)     
+    -- main fixed-point detection algorithm
+    -- used during evaluation of EStarCase    
     foldWFP n term f env fpOffset = do
         i' <- evalToInt n env
         -- evaluate either the zero or the (succ i) case
@@ -220,20 +225,26 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
                 return (True, baseRes)
             nonzero
                 | nonzero > 0 -> do
-                    resPair <- trace ("Calling fold with: " ++ show i') (foldWFP (ENum (nonzero - 1)) term f env fpOffset)
+                    --resPair <- trace ("Calling fold with: " ++ show i') (foldWFP (ENum (nonzero - 1)) term f env fpOffset)
+                    resPair <- (foldWFP (ENum (nonzero - 1)) term f env fpOffset)
                     let res = snd resPair
                         resExpr = fromValue res 
-                        exec = fst resPair in 
+                        exec = fst resPair in -- tells whether to compose with term 
                         case exec of 
                             True -> do
                                 app <- eval (EApp f (EPreComputed resExpr)) env
-                                if app == res 
+                                -- this is the check for weak-language equivalence 
+                                -- internally it uses the NFALang and its comparison defined above
+                                if app == res  
                                     then do 
                                         onFP . offsetFixedPoint i' $ fromValueInt fpOffset
+                                        -- return fixed-point net and tell say to not keep composing
                                         return (False, app) 
                                     else 
+                                        -- fixed-point not reached so the recursion keeps looking
                                         return (True, app)
                             False -> do
+                                -- in case fixed-point has been reached don't compose and just return it
                                 return resPair
                 | otherwise -> error "Detected negative intcase argument!"
     
@@ -248,6 +259,9 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
     fromValue (VBase p) = p
     fromValue _ = error "Non-base type" 
 
+    -- the fixed-point number depends on whether the expression is starcase or **
+    -- this function is used by the optimisation to kow where to begin checking from again
+    -- ofsetting is used to set the fixed-point as number of nets that are composed
     offsetFixedPoint :: Int -> Int -> Int
     offsetFixedPoint n 0 = n
     offsetFixedPoint 1 1 = 1
@@ -286,12 +300,14 @@ expr2NFAWFP getP expr = do
                     return (reachRes', ReassocApplied a)
                 (_, ReassocFail)        -> return (reachRes, ReassocFail)
   where
+    -- the main function that verifies reachability for the system
     makeProof expr' n fp maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
         let (numberedExpr, nfas) =
                 runState (traverse initialNumbering expr') (0, [])
             initState = MemoState initCounters nfas M.empty HM.empty False Nothing
-            getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
+            -- getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
+            getP' = promptForParam ref
         case n of 
             1 -> do 
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
@@ -307,7 +323,8 @@ expr2NFAWFP getP expr = do
                 case (maxIter, nfa, counts) of 
                     (True, _, (_, _, False, _)) -> return (FPUnreachable (Just n))
                     (_, False, _)               -> return (FPUnverifiable n)
-                    (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p (Just p) False)
+                    -- (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p (Just p) False)
+                    (_, _, (_, _, _, Just p))   -> makeProof expr' p (Just p) False
                     _                           -> makeProof expr' (n - 1) fp False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
@@ -336,9 +353,11 @@ expr2NFAWFP getP expr = do
     unknownCompose = bumpOpCounter sq2
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
+    -- what to do when a fixed-point is reached at nth step
     onFixedPoint n = do
         fixedPoint .= True
-        fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
+        -- fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
+        fpcounter .= Just n
 
     onNet :: InterleavingMarkedNet -> NFAEvalM NFALang
     onNet (shouldInterleave, markedNet) = do

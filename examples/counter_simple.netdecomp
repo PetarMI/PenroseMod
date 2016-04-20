@@ -22,4 +22,5 @@ TRANS
     }
 
 WIRING
-leftend ; intcase read rightend (\x : Net 1 0 . counter ; x)
+--leftend ; intcase read rightend (\x : Net 1 0 . counter ; x)
+intcase read leftend (\x : Net 0 1 . x ; counter) ; rightend

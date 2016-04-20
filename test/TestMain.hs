@@ -2252,7 +2252,7 @@ reassocOr5 = reassocRes @?= ReassocFail
     where
         reassocRes = ReassocNotAttempted <||> ReassocFail
 
-
+-- reassociate a left associative expression
 reassocLeft :: Assertion 
 reassocLeft = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
     where 
@@ -2276,6 +2276,7 @@ reassocLeft = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
 
         reassocRes = reassocExpr expr
 
+-- reassociate a right associative expression
 reassocRight :: Assertion 
 reassocRight = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
     where 
@@ -2299,6 +2300,7 @@ reassocRight = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
 
         reassocRes = reassocExpr expr
 
+-- reassociate a left associative expression used as a variable 
 reassocLeftVar :: Assertion
 reassocLeftVar = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
     where
@@ -2322,6 +2324,7 @@ reassocLeftVar = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
 
         reassocRes = reassocExpr expr
 
+-- reassociate a right associative expression used as a variable 
 reassocRightVar :: Assertion
 reassocRightVar = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
     where
@@ -2345,6 +2348,8 @@ reassocRightVar = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
 
         reassocRes = reassocExpr expr
 
+-- reassociate expression where we have more than one binding in the whole expression
+-- tests the variable offsetting 
 reassocVarNestedSeq :: Assertion
 reassocVarNestedSeq = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
     where
@@ -2370,6 +2375,7 @@ reassocVarNestedSeq = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
 
         reassocRes = reassocExpr expr
 
+-- test the case where the body of the lambda also has a variable
 reassocVarNestedLam :: Assertion
 reassocVarNestedLam = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
     where
@@ -2395,6 +2401,7 @@ reassocVarNestedLam = reassocRes @?= (expectedExpr, ReassocApplied LeftAssoc)
 
         reassocRes = reassocExpr expr
 
+--test case where everything is a variable
 reassocVarNestedBoth :: Assertion 
 reassocVarNestedBoth = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
     where
@@ -2422,6 +2429,8 @@ reassocVarNestedBoth = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
 
         reassocRes = reassocExpr expr
 
+-- stress testing on variable offsetting as everuthing is a variable and the expression
+-- even has variables that are unused
 reassocVarNestedExtra :: Assertion 
 reassocVarNestedExtra = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
     where
@@ -2453,6 +2462,7 @@ reassocVarNestedExtra = reassocRes @?= (expectedExpr, ReassocApplied RightAssoc)
 
         reassocRes = reassocExpr expr
 
+-- not in supported family of nets
 reassocResultFail1 :: Assertion 
 reassocResultFail1 = reassocRes @?= (expr, ReassocFail)
     where
@@ -2644,24 +2654,6 @@ instance Eq ReassocResult where
     ReassocFail == ReassocFail                 = True
     ReassocNotAttempted == ReassocNotAttempted = True
     _ == _                                     = False
-
-{--instance (Eq p) => Eq (Expr p) where 
-    (EVar vid1) == (EVar vid2) = (varToInt vid1) == (varToInt vid2)
-    (ENum n1) == (ENum n2) = n1 == n2
-    ERead == ERead = True
-    (EIntCase n1 term1 f1) == (EIntCase n2 term2 f2) = 
-        (n1 == n2) && (term1 == term2) && (f1 == f2)
-    (EStarCase n1 term1 f1 off1) == (EStarCase n2 term2 f2 off2) = 
-        (n1 == n2) && (term1 == term2) && (f1 == f2) && (off1 == off2)
-    (EBin _ _ _) == (EBin _ _ _) = True
-    (EConstant _ ) == (EConstant _) = True
-    (EPreComputed p1) == (EPreComputed p2) = p1 == p2
-    (EApp f1 v1) == (EApp f2 v2) = (f1 == f2) && (v1 == v2)
-    (ELam b1) == (ELam b2) = b1 == b2
-    (EBind v1 b1) == (EBind v2 b2) = (v1 == v2) && (b1 == b2)
-    (ESeq t1) == (ESeq t2) = t1 == t2
-    (ETen t1) == (ETen t2) = t1 == t2
-    _ == _ = False--}
 
 
 addEvalLeet = exprEval (const . return $ 1337) add add onfp getParam

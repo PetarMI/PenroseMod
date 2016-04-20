@@ -27,7 +27,6 @@ main = do
         (output : file : rest) -> do
             outputType <- parseOutputType output
             -- Entry Point of execution
-            -- See what 'go' 'as' are 
             -- calls the correct runner is src/Run.hs
             let go as q = runner outputType file as >>= printRes q
             -- check if the user has passed any of the optional parameters 
@@ -103,51 +102,19 @@ main = do
                                , indent $ show fixedPoint
                                ]
 
+    {-- Print the result of the parametrized model checking
+        1st line - reachability result
+        2nd line - information about rassociation that was potentially applied
+        NFAResultWFP implements Show so no need for extra formatting
+    --}
     printRes _ ( NFAResultWFP (reach, reassoc),  _ ) = do
         putStrLn reach
         putStrLn reassoc
 
+    -- print result of COMP_Expr - expression tree
     printRes _ ( NetExprResult (res, b), _ ) = do
         putStrLn res  
-        putStrLn (show b)
-        
-    {--printRes quiet ( NFAResultWFP ( res
-                               , ( Counters (StrictTriple net2nfa nfa neither)
-                                            (StrictQuad compYes compNo tenYes tenNo)
-                                 , (net2nfas, nfas, binops)
-                                 , fixedPoint
-                                 )
-                               )
-                   , time
-                   ) = do
-        putStrLn res
-        unless quiet $
-            putStrLn $ unlines [ ""
-                               , "Time:"
-                               , indent $ printf "%3fs" time
-                               , ""
-                               , "Counters:"
-                               , indent $ show net2nfa ++ " net2NFA hits,"
-                               , indent $
-                                     show nfa ++ " language equivalent known NFAs,"
-                               , indent $ show neither ++ " unknown Net/NFAs."
-                               , ""
-                               , indent $
-                                    show (compYes, tenYes)
-                                    ++ " known (;/*) op & args ("
-                                    ++ show (compYes + tenYes) ++ " total),"
-                               , indent $
-                                    show (compNo, tenNo)
-                                    ++ " unknown (;/*) op & args ("
-                                    ++ show (compNo + tenNo) ++ " total)."
-                               , ""
-                               , "Cache:"
-                               , indent $ show net2nfas ++ " recorded net2NFA,"
-                               , indent $ show nfas ++ " unique language NFAs,"
-                               , indent $ show binops ++ " Binary op triples."
-                               , "Fixed point"
-                               , indent $ show fixedPoint
-                               ]   --}                          
+        putStrLn (show b)        
 
 outputTypes :: String
 outputTypes = $(do

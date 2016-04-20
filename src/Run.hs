@@ -36,14 +36,14 @@ import Util ( promptForParam, timeIO, failError, (.:), pretty )
 import ProcessExpr
 import Debug.Trace
 
--- TODO: we should really separate the output type from the computation type
+
 data OutputType = Comp_NFA
                 | Comp_NFA_FP   -- The new mode in which Penrose will run
                 | Comp_Expr     -- mode just to show a skeleton of the resulting expr 
                 | Comp_NFADot
                 deriving (Read, Show)
 
--- some function telling more about the output type selected by the user
+-- a function telling more about the output type selected by the user
 outputTypeDoc :: OutputType -> String
 outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
   where
@@ -54,10 +54,13 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
                               ++ "using Fixed-point checking for reachability")
         Comp_NFADot -> (compStr, "DOT format representation of resulting "
                                  ++ "(reduced) NFA")
-        Comp_Expr   -> (compStr, "Show the net which will be evaluated")
+        Comp_Expr   -> (compStr, "Show the expression tree of the net which will be evaluated")
     compStr = "Compositional: traverse wiring decomposition, converting to "
               ++ "output,\nexploiting memoisation and language-equivalence."
 
+{--
+Add two more output types to hold the result of the two new modes
+--}
 data RunResult = NFAResult (String, (Counters, Sizes, Bool))
                | NFAResultWFP (String, String)
                | NWBResult String
@@ -87,13 +90,11 @@ runner outputType file mbParams = do
             -- the function body becomes -> goNFA nfaWB2NFAOutput input getP
             -- input is the file that is read (nets and wiring)
             -- getP is the number of nets that is taken as user input. Here it is passed as IO Int
-            -- now go to line 135
             (\f -> f input getP) $ case outputType of
-                -- this is the case that we go to
                 -- partially apply goNFA with nfaWB2NFAOutput
-                -- nfaWB2NFAOutput is some datatype
+                -- nfaWB2NFAOutput is a datatype
                 Comp_NFA -> goNFA nfaWB2NFAOutput
-                -- TODO change name of output function
+                -- apply the mode with correct configurations
                 Comp_NFA_FP -> goNFA_FP nfaWB2NFAReachabilityOutput
                 Comp_NFADot -> goNFA nfaWB2Dot
                 Comp_Expr -> goExpr exprSkeleton
@@ -101,7 +102,6 @@ runner outputType file mbParams = do
   where
     libDir = takeDirectory file </> "lib"
 
-    -- function that is called next
     -- partially apply 'runWith' 
     -- fmt is what to do with the result 
     -- second arg is a pair of the boundaries
@@ -109,7 +109,7 @@ runner outputType file mbParams = do
     goNFA fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResult (first fmt) (expr2NFA getP)
     -- fmt tells us how to format what the main eval function (expr2NFAWFP) returns
-    -- input is the file that we do not right now (we are hardcoding the buffer)
+    -- input is the file
     -- getP is the Int that the user passes
     goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResultWFP fmt (expr2NFAWFP getP)
@@ -117,7 +117,7 @@ runner outputType file mbParams = do
     goExpr fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NetExprResult (first fmt) convertExpr
 
-    -- What we return after we get the result
+    -- How we process the result the result
     doOutput toRes format convert =
         timeIO . ((toRes . format) <$>) . convert
 
@@ -125,13 +125,14 @@ runner outputType file mbParams = do
 
     getNFABounds (NFAWithBoundaries _ l r) = (l, r)
 
-    -- called by goNFA
+    -- called by goNFA functions
+    -- main controller of execution
     runWith getLib getBounds input outputter = do
         lib <- getLib
         let lookupImport name = lib >>= M.lookup name
             -- parse the input
             compAndWiring = parseComponentsAndWiring input
-            -- sugar parsing among other stuff 
+            -- sugar parsing and net import 
             renamed = compAndWiring >>= lookupNames lookupImport
         case renamed of
             Left err -> failError $ "couldn't parse: " ++ err
@@ -141,7 +142,8 @@ runner outputType file mbParams = do
                 case exprType of
                     Left err -> failError $ "Couldn't typecheck: "
                                                 ++ show err
-                    -- interpret and execute
+                    -- interpret and execute in case the typechecking went fine
+                    -- expr'is in the form of an execution tree
                     Right (expr', TyArr _ _) -> outputter expr'
                     Right ty -> failError $
                         "Top-level expr must be base type, got: "++ show ty
@@ -176,7 +178,7 @@ getLibraryContents dir = do
             contents <- map (dir </>) <$> getDirectoryContents dir
             filterM ((isRegularFile <$>) . getFileStatus) contents
 
--- function for the extra mode
+-- function for the extra mode that pretty prints the expression tree
 -- we only need the expression produced by the typechecker 
 convertExpr :: (Show t) => Expr t -> IO (Expr t, String)
 convertExpr expr = return (second show (reassocExpr expr))

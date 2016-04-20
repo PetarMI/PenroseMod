@@ -22,4 +22,5 @@ TRANS
     }
 
 WIRING
-leftend ; starcase read rightend (\x : Net 1 0 . counter ; x)
+--leftend ; starcase read rightend (\x : Net 1 0 . counter ; x)
+starcase read leftend (\x : Net 0 1 . x ; counter) ; rightend

@@ -2,3 +2,4 @@ dist/
 .cabal-sandbox
 cabal.sandbox.config
 *.txt
+exampleskstar/Comp_NFA_FP_reassoc_wvars.txt

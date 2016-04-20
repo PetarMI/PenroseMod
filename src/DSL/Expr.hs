@@ -38,12 +38,12 @@ newtype VarId = VarId { varToInt :: Int }
               deriving (Eq, Ord, Show)
 
 -- 'SugarExpr p' contains precomputed values of type @p@, and includes a
--- SENSequence term which is desugared by the typechecker into a fold.
+-- SENSequence and SEkstar terms are desugared by the typechecker into a fold.
 data SugarExpr p = SEVar VarId
                  | SENum Int
                  | SERead
                  | SEIntCase (SugarExpr p) (SugarExpr p) (SugarExpr p)
-                 | SEStarCase (SugarExpr p) (SugarExpr p) (SugarExpr p)
+                 | SEStarCase (SugarExpr p) (SugarExpr p) (SugarExpr p) 
                  | SENSequence (SugarExpr p) (SugarExpr p)
                  | SEkstar (SugarExpr p)
                  | SEBin BinOp (SugarExpr p) (SugarExpr p)
@@ -109,6 +109,8 @@ instance (Show p) => Show (Value m p) where
     show (VBase b) = "VBase " ++ show b
     show (VInt i) = "VInt " ++ show i
 
+-- used for fixed-point detection
+-- if p is NFA with boundaries it checks internally for weak language equivalence
 instance (Eq p) => Eq (Value m p) where
     (VBase b1) == (VBase b2) = b1 == b2
     (VInt i) == (VInt n) = i == n
@@ -187,6 +189,8 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             (succCase', sTy) <- checkType' succCase
             checkTypeConstraint $ TCEquality sTy (zTy :-> zTy)
             return (EIntCase i' zeroCase' succCase', zTy)
+        -- typecheck the starcase 
+        -- hidden parameters indicates this is originally a starcase op
         (SEStarCase i zeroCase succCase) -> do
             (i', iTy) <- checkType' i
             when (iTy /= TyInt) $ die $ NotInt iTy
@@ -222,9 +226,8 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
         (SEkstar net) -> do
             (_, netTy) <- checkType' net
             let varExpr = SEVar . VarId
-                -- TODO
-                -- out of curiousity try binding the num to SERead as well
-                -- shouldnt make any difference 
+                -- desugar ** into a starcase
+                -- build new expression and ensure free variables are offset 
                 dsExpr = SEBind net $
                                SEStarCase (SEBin Sub SERead (SENum 1))
                                           (varExpr 0)
@@ -234,7 +237,7 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             case netTy of
                 TyArr x y 
                     | x == y -> do
-                        -- desugaring of SEkstar to EStarCase
+                        -- typecheck the new expression
                         -- (dsExpr', dsExprType) <- trace (show dsExpr) (checkType' dsExpr) 
                         (dsExpr', dsExprType) <- offsetStarCase <$> checkType' dsExpr
                         if dsExprType /= netTy
@@ -282,6 +285,7 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
         go x = return x
 
     -- offsetStarCase :: Expr p -> Expr p
+    -- used to say the starcase is actually **
     offsetStarCase (EBind v (EStarCase i z s _), t) = (EBind v (EStarCase i z s (ENum 0)), t)
     offsetStarCase n                        = trace (show n) (error "Offsetting Error when desugaring")
  
@@ -319,9 +323,11 @@ checkType getBounds term = runReaderT (checkType' term) emptyContext
             checkTypeConstraint $ TCEquality t2 t4
         _ -> die $ IncompatableTypes ty1 ty2
 
+-- main Reassociating function 
 reassocExpr :: (Show t) => Expr t -> (Expr t, ReassocResult)
 reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
   where 
+    -- look for sequential compositions of the supported form and try to reassociate them
     reassocExpr' :: (Show t) => Expr t -> ReassocResult -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
     reassocExpr' expr' reassoc env = case expr' of
         (ENum n) -> (ENum n, reassoc, env)
@@ -351,12 +357,14 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
                 (body', reassoc2, env2) = reassocExpr' body reassoc (e1 : env)
             in (EBind (head env2) body', reassoc <||> reassoc1 <||> reassoc2, (tail env2))
 
+    -- when a sequential composition is found check if it forms a left or right deep tree using a starcase
     reassocSequence :: (Show t) => Expr t -> [Expr t] -> (Expr t, ReassocResult, [Expr t])
     reassocSequence expr' env = case expr' of 
         (ESeq e (EStarCase n term (ELam (ESeq t1 (EVar v))) offset)) -> 
                 ((ESeq (EStarCase n e (ELam (ESeq (EVar v) t1)) offset) term), (ReassocApplied LeftAssoc), env) 
         (ESeq (EStarCase n term (ELam (ESeq (EVar v) t2)) offset) e) -> 
                 ((ESeq term (EStarCase n e (ELam (ESeq t2 (EVar v))) offset)), (ReassocApplied RightAssoc), env)
+        -- handle the case where they are both variables
         (ESeq (EVar v1) (EVar v2)) ->
             let (EVar fold, EVar v, assoc) = findAssociation (EVar v1) (EVar v2) env
                 (intCase, term, reassocRes) = reassocIntCase (EVar fold) (EVar v) assoc env
@@ -365,6 +373,7 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
                 (ReassocApplied a, RightAssoc) -> ((ESeq (EVar fold) term), reassocRes, env')
                 (ReassocApplied a, LeftAssoc) -> ((ESeq term (EVar fold)), reassocRes, env')
                 (ReassocFail, _) -> (expr', reassocRes, env)
+        -- handle cases where the starcase is a variable
         (ESeq operand (EVar v)) -> 
             let (intCase, term, reassocRes) = reassocIntCase (EVar v) operand RightAssoc env
                 env' = substitudeIntCase intCase (varToInt v) env
@@ -406,11 +415,13 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
             _ -> ((EVar v), operand, ReassocFail)
     reassocIntCase _ _ _ _ = error "Error while reassociating IntCase"
 
+    -- update the environment with the reassociated starcase
     substitudeIntCase :: Expr t -> Int -> [Expr t] -> [Expr t]
     substitudeIntCase intCase 0 (x:xs) = (intCase : xs)
     substitudeIntCase intCase n (x:xs) = x : (substitudeIntCase intCase (n - 1) xs)
     substitudeIntCase _ _ []           = error "Error while reassociating variable binding"
 
+    -- find where the starcase is defined 
     findAssociation :: Expr t -> Expr t -> [Expr t] -> (Expr t, Expr t, ReassocType)
     findAssociation (EVar v1) (EVar v2) env = 
         let varExpr1 = env !! varToInt v1
@@ -420,6 +431,7 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
             (_, EStarCase _ _ _ _) -> ((EVar v2), (EVar v1), RightAssoc)
             _                      -> error "Error while searching for a bound StarCase"
 
+    -- offset a variabe which becomes a new term in the outer sequential operation
     offsetVar :: Expr t -> [Expr t] -> Expr t
     offsetVar expr' env = case expr' of 
         (EVar (VarId n)) -> 
@@ -444,6 +456,8 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
         (EVar (VarId n)) -> (env !! (n + 1))
         _                -> expr
 
+    -- check if there is a starcase definded above
+    -- used to decide by how much the variables should be offset
     findFold :: [Expr t] -> Int
     findFold env = findFold' env 0
         where
@@ -453,9 +467,11 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
                 (EStarCase _ _ _ _) -> n
                 _                   -> findFold' es (n + 1)
 
+    -- return only the expression after reassociating 
     takeExpr res = case res of 
         (expr', reassocRes, _) -> (expr', reassocRes)
 
+-- function that is used for pretty printing of the wiring expression
 exprSkeleton :: forall t . Show t => Expr t -> String
 exprSkeleton expr = exprSkeleton' expr 0 2
   where
@@ -505,6 +521,6 @@ exprSkeleton expr = exprSkeleton' expr 0 2
             in top
         _ -> addOffset "Blargh" offset 
 
-addOffset :: String -> Int -> String
-addOffset str 0 = str ++ "\n"
-addOffset str n = ' ' : (addOffset str (n - 1))
+    addOffset :: String -> Int -> String
+    addOffset str 0 = str ++ "\n"
+    addOffset str n = ' ' : (addOffset str (n - 1))

@@ -20,14 +20,7 @@ TRANS
     }
 WIRING
 bind n = read in
-bind left = leftend in 
+bind left = leftend in
+bind right = rightend in  
 bind buf = starcase n left (\x : Net 0 1 . x ; opb) in
-bind right = rightend in 
 buf ; right
-
---EStarCase 
-    --(EVar (VarId {varToInt = 1})) 
-    --(EVar (VarId {varToInt = 0})) 
-    --(ELam (ESeq (EConstant) 
-                --(EVar (VarId {varToInt = 0})))) 
-    --(ENum 1)
