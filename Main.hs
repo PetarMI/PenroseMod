@@ -68,7 +68,6 @@ main = do
                                , ( Counters (StrictTriple net2nfa nfa neither)
                                             (StrictQuad compYes compNo tenYes tenNo)
                                  , (net2nfas, nfas, binops)
-                                 , fixedPoint
                                  )
                                )
                    , time
@@ -98,8 +97,6 @@ main = do
                                , indent $ show net2nfas ++ " recorded net2NFA,"
                                , indent $ show nfas ++ " unique language NFAs,"
                                , indent $ show binops ++ " Binary op triples."
-                               , "Fixed point"
-                               , indent $ show fixedPoint
                                ]
 
     {-- Print the result of the parametrized model checking

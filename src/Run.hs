@@ -61,7 +61,7 @@ outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
 {--
 Add two more output types to hold the result of the two new modes
 --}
-data RunResult = NFAResult (String, (Counters, Sizes, Bool))
+data RunResult = NFAResult (String, (Counters, Sizes))
                | NFAResultWFP (String, String)
                | NWBResult String
                | RawResult String

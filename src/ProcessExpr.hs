@@ -184,9 +184,14 @@ exprEval onConstant onSeq onTens onFP getP expr = eval expr []
         y' <- evalToInt y env
         return $ VInt $ x' `f` y'
     eval (EIntCase i z s) env = do
-        n <- eval (ENum 0) env
-        resPair <- foldWFP i z s env n
-        return (snd resPair)
+        i' <- evalToInt i env
+        -- evaluate either the zero or the (succ i) case
+        case i' of
+            0 -> eval z env
+            nonzero
+                | nonzero > 0 ->
+                    eval (EApp s (EIntCase (ENum $ nonzero - 1) z s)) env
+                | otherwise -> error "Detected negative intcase argument!"
     eval (EStarCase i z s n) env = do
         offset <- eval n env
         resPair <- foldWFP i z s env offset
@@ -435,7 +440,7 @@ expr2NFAWFP getP expr = do
 -- this is the function that is the entry point for this module
 -- acts as the outputter variable in Run.hs
 expr2NFA :: IO Int -> Expr NFAWithBounds
-         -> IO (NFAWithBounds, (Counters, Sizes, Bool))
+         -> IO (NFAWithBounds, (Counters, Sizes))
 expr2NFA getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
@@ -454,7 +459,7 @@ expr2NFA getP expr = do
                                 ++ show other
 
     getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
-        (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints)
+        (count, (M.size net2nfa, fst nfas, HM.size binMap))
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
 

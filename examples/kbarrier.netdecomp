@@ -50,4 +50,4 @@ bind choiceproc = (choice * choice) ; mixconn ; (proc * id2) in
 -- bind procs = n_sequence read choiceproc in
 -- kbarrier ; procs ; rightend2
 -- kbarrier ; intcase read rightend2 (\x : Net 2 0 . choiceproc ; x)
-starcase read kbarrier (\x : Net 0 2 . x ; choiceproc) ; rightend2
+intcase read kbarrier (\x : Net 0 2 . x ; choiceproc) ; rightend2
