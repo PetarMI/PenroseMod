@@ -34,7 +34,6 @@ import NFA ( nfaWB2Dot, nfaWB2NFAOutput, nfaWB2NFAReachabilityOutput, NFAWithBou
            , toNFAWithMarking )
 import Util ( promptForParam, timeIO, failError, (.:), pretty )
 import ProcessExpr
-import Debug.Trace
 
 
 data OutputType = Comp_NFA
@@ -114,7 +113,7 @@ runner outputType file mbParams = do
     goNFA_FP fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NFAResultWFP fmt (expr2NFAWFP getP)
 
-    goExpr fmt input getP = runWith (findLibraryNFAs libDir) getNFABounds input $
+    goExpr fmt input _ = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NetExprResult (first fmt) convertExpr
 
     -- How we process the result the result

@@ -5,7 +5,7 @@ module ProcessExpr where
 import Control.Arrow ( second, (***) )
 import Control.Applicative ( (<$>) )
 import Control.DeepSeq ( NFData(..) )
-import Control.Lens ( makeLenses, (%=), use, (.=), (^.) )
+import Control.Lens ( makeLenses, (%=), use, (.=) )
 import Control.Monad ( when, liftM )
 import Control.Monad.Trans ( lift )
 import Control.Monad.Trans.State.Strict ( StateT, runStateT, modify
@@ -130,7 +130,6 @@ data MemoState = MemoState
     , _knownNFAs :: !(Int, [NFALang])
     , _net2NFA :: !Net2NFAMap
     , _binOpMap :: !NFABinaryMap
-    , _fixedPoint :: !Bool
     , _fpcounter :: !(Maybe Int)
     }
 
@@ -304,13 +303,14 @@ expr2NFAWFP getP expr = do
                     reachRes' <- makeProof nexpr param Nothing True
                     return (reachRes', ReassocApplied a)
                 (_, ReassocFail)        -> return (reachRes, ReassocFail)
+                _                       -> return (reachRes, ReassocFail) -- this is ReassocNotAttempted and cant happen
   where
     -- the main function that verifies reachability for the system
     makeProof expr' n fp maxIter =  do
         ref <- newIORef (fromMaybe [] (Just [n]))
         let (numberedExpr, nfas) =
                 runState (traverse initialNumbering expr') (0, [])
-            initState = MemoState initCounters nfas M.empty HM.empty False Nothing
+            initState = MemoState initCounters nfas M.empty HM.empty Nothing
             -- getP' = trace ("Calling makeProof with " ++ (show n)) (promptForParam ref)
             getP' = promptForParam ref
         case n of 
@@ -326,10 +326,10 @@ expr2NFAWFP getP expr = do
                 let nfa = nfaReachability $ fst evalRes
                     counts = snd evalRes
                 case (maxIter, nfa, counts) of 
-                    (True, _, (_, _, False, _)) -> return (FPUnreachable (Just n))
+                    (True, _, (_, _, Nothing)) -> return (FPUnreachable (Just n))
                     (_, False, _)               -> return (FPUnverifiable n)
                     -- (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p (Just p) False)
-                    (_, _, (_, _, _, Just p))   -> makeProof expr' p (Just p) False
+                    (_, _, (_, _, Just p))   -> makeProof expr' p (Just p) False
                     _                           -> makeProof expr' (n - 1) fp False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
@@ -342,8 +342,8 @@ expr2NFAWFP getP expr = do
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
 
-    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
-        (count, (M.size net2nfa, fst nfas, HM.size binMap), fixedPoints, fpcount)
+    getCountAndSizes (MemoState count nfas net2nfa binMap fpcount) =
+        (count, (M.size net2nfa, fst nfas, HM.size binMap), fpcount)
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
 
@@ -360,7 +360,6 @@ expr2NFAWFP getP expr = do
     unknownTensor = bumpOpCounter sq4
     -- what to do when a fixed-point is reached at nth step
     onFixedPoint n = do
-        fixedPoint .= True
         -- fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
         fpcounter .= Just n
 
@@ -445,7 +444,7 @@ expr2NFA getP expr = do
     -- Tag all the imported NFAs with their IDs
     let (numberedExpr, nfas) =
             runState (traverse initialNumbering expr) (0, [])
-        initState = MemoState initCounters nfas M.empty HM.empty False Nothing
+        initState = MemoState initCounters nfas M.empty HM.empty Nothing
     second getCountAndSizes <$> runStateT (doEval numberedExpr) initState
   where
     initialNumbering = getOrInsert (return ()) (return ()) get modify
@@ -458,7 +457,7 @@ expr2NFA getP expr = do
             other -> error $ "Finished eval with non-NFA result: "
                                 ++ show other
 
-    getCountAndSizes (MemoState count nfas net2nfa binMap fixedPoints fpcount) =
+    getCountAndSizes (MemoState count nfas net2nfa binMap _) =
         (count, (M.size net2nfa, fst nfas, HM.size binMap))
 
     initCounters = Counters (StrictTriple 0 0 0) (StrictQuad 0 0 0 0)
@@ -475,7 +474,6 @@ expr2NFA getP expr = do
     knownTensor = bumpOpCounter sq3
     unknownTensor = bumpOpCounter sq4
     onFixedPoint n = do
-        fixedPoint .= True
         fpcounter .= trace ("Setting fixed point to: " ++ show n) (Just n)
     -- onParam n = fpcounter .= Just n
 

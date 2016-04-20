@@ -39,5 +39,5 @@ TRANS { {in, out}
 WIRING
 IMPORT id, id2, epsilon, eta
 bind contTask = controller ; (task * id2) in
-bind contTasks = n_sequence read contTask in
+bind contTasks = contTask ** in
 eta ; ((barrier ; contTasks ; idrend) * id) ; epsilon

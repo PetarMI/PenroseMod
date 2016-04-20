@@ -341,19 +341,19 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
             let (nexpr, reassoc1, env') = reassocSequence (ESeq t1 t2) env
             in (nexpr, reassoc <||> reassoc1, env')
         (ETen t1 t2) -> 
-            let (et1, reassoc1, env1) = reassocExpr' t1 reassoc env
-                (et2, reassoc2, env2) = reassocExpr' t2 reassoc env
+            let (et1, reassoc1, _) = reassocExpr' t1 reassoc env
+                (et2, reassoc2, _) = reassocExpr' t2 reassoc env
             in (ETen et1 et2, reassoc <||> reassoc1 <||> reassoc2, env)
         (EVar v) -> (EVar v, reassoc, env)
         (EApp f param) ->  
-            let (f', reassoc1, env1) = reassocExpr' f reassoc env
-                (param', reassoc2, env2) = reassocExpr' param reassoc env
+            let (f', reassoc1, _) = reassocExpr' f reassoc env
+                (param', reassoc2, _) = reassocExpr' param reassoc env
             in (EApp f' param', reassoc <||> reassoc1 <||> reassoc2, env)
         (ELam body) -> 
             let (body', reassoc1, env') = reassocExpr' body reassoc env
             in (ELam body', reassoc <||> reassoc1, env')
         (EBind e1 body) -> 
-            let (e1', reassoc1, env1) = reassocExpr' e1 reassoc env
+            let (_, reassoc1, _) = reassocExpr' e1 reassoc env
                 (body', reassoc2, env2) = reassocExpr' body reassoc (e1 : env)
             in (EBind (head env2) body', reassoc <||> reassoc1 <||> reassoc2, (tail env2))
 
@@ -370,22 +370,25 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
                 (intCase, term, reassocRes) = reassocIntCase (EVar fold) (EVar v) assoc env
                 env' = substitudeIntCase intCase (varToInt fold) env
             in case (reassocRes, assoc) of 
-                (ReassocApplied a, RightAssoc) -> ((ESeq (EVar fold) term), reassocRes, env')
-                (ReassocApplied a, LeftAssoc) -> ((ESeq term (EVar fold)), reassocRes, env')
+                (ReassocApplied _, RightAssoc) -> ((ESeq (EVar fold) term), reassocRes, env')
+                (ReassocApplied _, LeftAssoc) -> ((ESeq term (EVar fold)), reassocRes, env')
                 (ReassocFail, _) -> (expr', reassocRes, env)
+                _                -> (expr', reassocRes, env)  -- this is ReassocNotAttempted but it is impossible to go there
         -- handle cases where the starcase is a variable
         (ESeq operand (EVar v)) -> 
             let (intCase, term, reassocRes) = reassocIntCase (EVar v) operand RightAssoc env
                 env' = substitudeIntCase intCase (varToInt v) env
             in case reassocRes of 
-                (ReassocApplied a) -> ((ESeq (EVar v) term), reassocRes, env')
+                (ReassocApplied _) -> ((ESeq (EVar v) term), reassocRes, env')
                 ReassocFail -> (expr', reassocRes, env)
+                _           -> (expr', reassocRes, env)  -- this is ReassocNotAttempted but it is impossible to go there
         (ESeq (EVar v) operand) -> 
             let (intCase, term, reassocRes) = reassocIntCase (EVar v) operand LeftAssoc env
                 env' = substitudeIntCase intCase (varToInt v) env
             in case reassocRes of 
-                (ReassocApplied a) -> ((ESeq term (EVar v)), reassocRes, env')
+                (ReassocApplied _) -> ((ESeq term (EVar v)), reassocRes, env')
                 ReassocFail -> (expr', reassocRes, env)
+                _           -> (expr', reassocRes, env)  -- this is ReassocNotAttempted but it is impossible to go there
         _ -> (expr', ReassocFail, env)
 
     -- 1st arg - the variable that we resolve
@@ -417,7 +420,7 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
 
     -- update the environment with the reassociated starcase
     substitudeIntCase :: Expr t -> Int -> [Expr t] -> [Expr t]
-    substitudeIntCase intCase 0 (x:xs) = (intCase : xs)
+    substitudeIntCase intCase 0 (_:xs) = (intCase : xs)
     substitudeIntCase intCase n (x:xs) = x : (substitudeIntCase intCase (n - 1) xs)
     substitudeIntCase _ _ []           = error "Error while reassociating variable binding"
 
@@ -449,12 +452,7 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
         in if operandPos > foldPos
                 then (EVar . VarId $ (operandPos - foldPos - 1), True)
                 else (EVar operand, False)
-    offsetOperand op fold = (op, True)
-
-    substitudeVar :: Expr t -> [Expr t] -> Expr t
-    substitudeVar expr env = case expr of 
-        (EVar (VarId n)) -> (env !! (n + 1))
-        _                -> expr
+    offsetOperand op _ = (op, True)
 
     -- check if there is a starcase definded above
     -- used to decide by how much the variables should be offset
@@ -462,7 +460,7 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
     findFold env = findFold' env 0
         where
             findFold' :: [Expr t] -> Int -> Int
-            findFold' [] n = error "No EStarCase found"
+            findFold' [] _ = error "No EStarCase found"
             findFold' (op : es) n = case op of 
                 (EStarCase _ _ _ _) -> n
                 _                   -> findFold' es (n + 1)
@@ -470,6 +468,13 @@ reassocExpr expr = takeExpr $ reassocExpr' expr ReassocFail []
     -- return only the expression after reassociating 
     takeExpr res = case res of 
         (expr', reassocRes, _) -> (expr', reassocRes)
+
+    {-- can be used by possible extension
+    substitudeVar :: Expr t -> [Expr t] -> Expr t
+    substitudeVar expr env = case expr of 
+        (EVar (VarId n)) -> (env !! (n + 1))
+        _                -> expr
+    --}
 
 -- function that is used for pretty printing of the wiring expression
 exprSkeleton :: forall t . Show t => Expr t -> String
