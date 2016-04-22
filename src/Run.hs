@@ -40,6 +40,14 @@ data OutputType = Comp_NFA
                 | Comp_NFA_FP   -- The new mode in which Penrose will run
                 | Comp_Expr     -- mode just to show a skeleton of the resulting expr 
                 | Comp_NFADot
+                | Mono_UnminNFA
+                | Mono_RawNet
+                | Mono_PNML
+                | Mono_LLNet
+                | Mono_LLNetReadArcs
+                | Mono_LLNetDot
+                | Mono_LOLANet
+                | Comp_NFASlow
                 deriving (Read, Show)
 
 -- a function telling more about the output type selected by the user
@@ -47,15 +55,26 @@ outputTypeDoc :: OutputType -> String
 outputTypeDoc outType = header ++ "\n" ++ detail ++ ".\n"
   where
     (header, detail) = case outType of
+        Mono_UnminNFA -> (monoStr, "Reachability graph, unminimised")
+        Mono_RawNet -> (monoStr, "Composite net, internal format")
+        Mono_PNML -> (monoStr, "Composite net, PNML format")
+        Mono_LLNet -> (monoStr, "Composite net, ll_net format")
+        Mono_LLNetReadArcs -> (monoStr, "Composite net, cunf ll_net format with read arcs")
+        Mono_LLNetDot -> (monoStr, "Composite net, DOT format, showing structure")
+        Mono_LOLANet -> (monoStr, "Composite net, LOLA format")
         Comp_NFA -> (compStr, "NFA format, used to import pre-computed NFAs "
                               ++ "for commonly used components")
         Comp_NFA_FP -> (compStr, "NFA format, used to import pre-computed NFAs "
                               ++ "using Fixed-point checking for reachability")
         Comp_NFADot -> (compStr, "DOT format representation of resulting "
                                  ++ "(reduced) NFA")
+        Comp_NFASlow -> (compStr, "DOT format representation of resulting "
+                                 ++ "(reduced) NFA, using naive (slow) algorithm")
         Comp_Expr   -> (compStr, "Show the expression tree of the net which will be evaluated")
     compStr = "Compositional: traverse wiring decomposition, converting to "
               ++ "output,\nexploiting memoisation and language-equivalence."
+    monoStr = "Monolithic: flatten wiring decomposition to composite "
+                   ++ "net, before output."
 
 {--
 Add two more output types to hold the result of the two new modes
@@ -65,6 +84,7 @@ data RunResult = NFAResult (String, (Counters, Sizes))
                | NWBResult String
                | RawResult String
                | NetExprResult (String, String)
+               | NFASlowResult (String, SlowCounters)
                deriving Show
 
 instance NFData RunResult where
@@ -73,6 +93,7 @@ instance NFData RunResult where
     rnf (NWBResult x) = rnf x
     rnf (RawResult x) = rnf x
     rnf (NetExprResult x) = rnf x
+    rnf (NFASlowResult x) = rnf x
 
 runner :: OutputType -> FilePath -> Maybe [Int] -> IO (RunResult, Double)
 runner outputType file mbParams = do
@@ -90,6 +111,13 @@ runner outputType file mbParams = do
             -- input is the file that is read (nets and wiring)
             -- getP is the number of nets that is taken as user input. Here it is passed as IO Int
             (\f -> f input getP) $ case outputType of
+                Mono_LLNet -> goNet toLLNet
+                Mono_LLNetReadArcs -> goNet toLLNetWithReadArcs
+                Mono_PNML -> goNet toPNML
+                Mono_LLNetDot -> goNet toLLDot
+                Mono_LOLANet -> goNet toLOLANet
+                Mono_RawNet -> goRaw toRawNet
+                Mono_UnminNFA -> goRaw toRawNFADot
                 -- partially apply goNFA with nfaWB2NFAOutput
                 -- nfaWB2NFAOutput is a datatype
                 Comp_NFA -> goNFA nfaWB2NFAOutput
@@ -97,10 +125,19 @@ runner outputType file mbParams = do
                 Comp_NFA_FP -> goNFA_FP nfaWB2NFAReachabilityOutput
                 Comp_NFADot -> goNFA nfaWB2Dot
                 Comp_Expr -> goExpr exprSkeleton
+                Comp_NFASlow -> goNFASlow nfaWB2Dot
 
   where
     libDir = takeDirectory file </> "lib"
 
+    toPNML marking = llNet2PNML marking . net2LLNet
+    toLLNet marking = unparseLLNet marking . net2LLNet
+    toLLNetWithReadArcs marking = unparseLLNetWithReadArcs marking . net2LLNetWithReadArcs
+    toLLDot marking = llNet2Dot marking . net2LLNet
+    toLOLANet marking = unparseLOLANet marking . net2LOLANet
+    toRawNet m = (++ "\nWanted Marking: " ++ pretty m) . pretty
+    toRawNFADot = nfaWB2Dot .: toNFAWithMarking False
+    
     -- partially apply 'runWith' 
     -- fmt is what to do with the result 
     -- second arg is a pair of the boundaries
@@ -115,6 +152,16 @@ runner outputType file mbParams = do
 
     goExpr fmt input _ = runWith (findLibraryNFAs libDir) getNFABounds input $
         doOutput NetExprResult (first fmt) convertExpr
+
+    goNet fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
+       doOutput NWBResult (uncurry fmt) (expr2NWB getP)
+
+    goRaw fmt input getP = runWith (findLibraryNWBs libDir) getNetBounds input $
+       doOutput RawResult (uncurry fmt) (expr2NWB getP)
+
+    goNFASlow fmt input getP =
+            runWith (findLibraryNFAs libDir) getNFABounds input $
+                doOutput NFASlowResult (first fmt) (expr2NFASlow getP)
 
     -- How we process the result the result
     doOutput toRes format convert =

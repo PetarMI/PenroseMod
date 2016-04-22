@@ -138,6 +138,7 @@ $(makeLenses ''MemoState)
 type Sizes = (Int, Int, Int)
 type NFAEvalM = StateT MemoState IO
 
+
 exprEval :: forall r m . (Monad m, Eq r, Show r)
          -- A function that'll turn nets into an "r" (whatever r ends up being)
          => (InterleavingMarkedNet -> m r)
@@ -553,4 +554,95 @@ expr2NFA getP expr = do
                             equivalenceHKC nfa1 nfa2
 
 
+expr2NWB :: IO Int -> Expr MarkedNet -> IO MarkedNet
+expr2NWB getP expr = do
+    res <- exprEval onNet onSeq onTens onFixedPoint getP expr
+    case res of
+        VBase b -> return b
+        other -> error $ "Finished eval with non-nwb result: " ++ show other
+  where
+    onNet = return . snd
+    onSeq mn1 mn2 =
+        let badCompose =
+                error $ "Couldn't compose: " ++ show mn1 ++ " and " ++ show mn2
+            mn = fromMaybe badCompose $ mn1 `Nets.composeMarkedNet` mn2
+        in return $ VBase mn
+    onTens (m1, n1) (m2, n2) =
+        return $ VBase (concatMarkingList m1 m2, Nets.tensor n1 n2)
+
+    onFixedPoint _ = do
+        return ()
+
+
+data SlowCounters = SlowCounters
+    { _sleafC :: !Int               -- # of leaves converted
+    , _sCompC :: !Int               -- # of sequential compositions performed
+    , _sTensC :: !Int               -- # of tensor compositions performed
+    , _sMaxNFAStateSize :: !MaxComp -- Biggest NFA size (# states) seen
+    }
+
+$(makeLenses ''SlowCounters)
+
+instance NFData SlowCounters where
+    rnf (SlowCounters l s t m) =
+        rnf l `seq` rnf s `seq` rnf t `seq` rnf m `seq` ()
+
+instance Show SlowCounters where
+    show (SlowCounters leaves seqs tens maxS) = show (leaves, seqs, tens, maxS)
+
+type NFASlowEvalM = StateT SlowCounters IO
+
+-- Do not perform any memoisation or minimisation optimisation steps. A hacky,
+-- copy-paste from expr2NFA, but we don't seriously expect to use this!
+expr2NFASlow :: IO Int -> Expr NFAWithBounds
+             -> IO (NFAWithBounds, SlowCounters)
+expr2NFASlow getP expr = do
+    let initState = SlowCounters 0 0 0 $ MaxComp (0, (0, 0))
+    flip runStateT initState $ do
+        res <- exprEval onNet onSeq onTens onFixedPoint (lift getP) expr
+        case res of
+            VBase wh -> return wh
+            other -> error $ "Finished eval with non-NFA result: "
+                                ++ show other
+  where
+    bumper f = f %= succ
+
+    bumpLeafCounter = bumper sleafC
+    bumpSeqCounter = bumper sCompC
+    bumpTensCounter = bumper sTensC
+
+    onNet (shouldInterleave, markedNet) = do
+        let nfa = uncurry (toNFAWithMarking shouldInterleave) markedNet
+        bumpLeafCounter
+        return nfa
+
+    nfaStates :: NFAWithBounds -> Integer
+    nfaStates (NFAWithBoundaries (NFA lts _ _) _ _) =
+        fromIntegral . S.size $ statesLTS lts
+
+    onSeq l r = doRecurse Compose l r $ \x y ->
+        let badCompose =
+                error $ "Couldn't compose: " ++ show x ++ " and " ++ show y
+        in fromMaybe badCompose $ x `NFA.compose` y
+
+    onTens l r = doRecurse Tensor l r NFA.tensor
+
+    doRecurse :: OpType -> NFAWithBounds -> NFAWithBounds
+              -> (NFAWithBounds -> NFAWithBounds -> NFAWithBounds)
+              -> NFASlowEvalM (Value NFASlowEvalM NFAWithBounds)
+    doRecurse op nfa1 nfa2 doCompose = do
+        let bump = case op of
+                          Compose -> bumpSeqCounter
+                          Tensor -> bumpTensCounter
+        bump
+        maxComp <- use sMaxNFAStateSize
+        let nfa1Size = nfaStates nfa1
+            nfa2Size = nfaStates nfa2
+            maxComp' = MaxComp (nfa1Size * nfa2Size, (nfa1Size, nfa2Size))
+        when (maxComp <= maxComp') $
+            sMaxNFAStateSize .= maxComp'
+        return . VBase $ doCompose nfa1 nfa2
+
+    onFixedPoint _ = do
+        return ()
 

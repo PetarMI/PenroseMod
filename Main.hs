@@ -16,7 +16,7 @@ import Text.Printf ( printf )
 import Run ( runner, OutputType, RunResult(..), outputTypeDoc )
 import Util ( dieWith, indentLines )
 import ProcessExpr ( Counters(..), StrictTriple(..), StrictQuad(..)
-                   , MaxComp(..) )
+                   , SlowCounters(..), MaxComp(..) )
 
 main :: IO ()
 main = do
@@ -64,6 +64,7 @@ main = do
                                , "Time:"
                                , indent $ printf "%3fs" time
                                ]
+                               
     printRes quiet ( NFAResult ( res
                                , ( Counters (StrictTriple net2nfa nfa neither)
                                             (StrictQuad compYes compNo tenYes tenNo)
@@ -111,7 +112,29 @@ main = do
     -- print result of COMP_Expr - expression tree
     printRes _ ( NetExprResult (res, b), _ ) = do
         putStrLn res  
-        putStrLn (show b)        
+        putStrLn (show b)
+
+    printRes quiet ( NFASlowResult
+                             ( res
+                             , SlowCounters leaves seqs tens (MaxComp (_, sizes))
+                             )
+                       , time
+                       ) = do
+            putStrLn res
+            unless quiet $
+                putStrLn $ unlines [ ""
+                                   , "Time:"
+                                   , indent $ printf "%3fs" time
+                                   , ""
+                                   , "Counters:"
+                                   , indent $ show leaves ++ " leaf conversions,"
+                                   , indent $ show seqs
+                                                ++ " sequential 2-NFA compositions,"
+                                   , indent $ show tens
+                                                ++ " tensor 2-NFA compositions,"
+                                   , indent $ "Max (intermediate) 2-NFA composition state counts: "
+                                                ++ show sizes
+                                   ]
 
 outputTypes :: String
 outputTypes = $(do

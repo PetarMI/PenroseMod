@@ -92,7 +92,7 @@ tests =
         , testCase "multiple queries of same place" queriesSamePlace
         , testCase "sync on same internal boundary" syncCommonBoundary
         ]
-    {--, testGroup "to NFA"
+    , testGroup "to NFA"
         [ testCase "simple net to nfa" simpleToNFA
         , testCase "epsilon loops" epsilonLoopsInNFA
         , testCase "interleaving test" useInterleaving
@@ -194,7 +194,7 @@ tests =
         , testCase "dead states with loops" dontKillNonDeadStates
         , testCase "dead states init is final" deadStatesInitIsFinal
         , testProperty "minimise preserve lang" prop_minimise_preserve_lang
-        ]--}
+        ]
     , testGroup "Evaluation"
         [ testCase "Recursive function" evalRecFunction
         , testCase "Unused bind" evalUnusedBind
