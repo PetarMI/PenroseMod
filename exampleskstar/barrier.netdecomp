@@ -1,7 +1,7 @@
 NET task
 PLACES [ <prep, 1, 0>
-       , <ready, 0, 1>
-       , <exec, 0, *> 
+       , <ready, 0, 0>
+       , <exec, 0, 1> 
        ]
 LBOUNDS [checkReady, start]
 RBOUNDS []

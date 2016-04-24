@@ -28,7 +28,7 @@ import NFA ( NFAWithBoundaries(..), tensor, modifyNFAWB, compose
            , toNFAWithMarking, equivalenceHKC, epsilonCloseNFA, NFA(..)
            , reflexivelyCloseNFA, nfaReachability )
 import Nets ( composeMarkedNet, tensor, MarkedNet )
-import Util ( promptForParam, ReachabilityResult(..), ReassocResult(..) )
+import Util ( promptForParam, ReachabilityResult(..), ReassocResult(..), decideVerifiability )
 import Data.IORef ( newIORef )
 import Debug.Trace
 
@@ -318,20 +318,21 @@ expr2NFAWFP getP expr = do
             1 -> do 
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
                 let nfa = nfaReachability $ fst evalRes
-                case (nfa, fp) of 
-                    (True, Just p) -> return (FPVerifiable p)
-                    (True, Nothing) -> return (FPUnreachable Nothing)
-                    (False, _) -> return (FPUnverifiable n)
+                    (_, _, fpres) = snd evalRes
+                case (nfa, fp, fpres) of 
+                    (True, Just p, _) -> return (FPVerifiable p)
+                    (True, _, Just p) -> return (FPVerifiable p) -- the case where 1 is the limit set by the user
+                    (True, _, _)      -> return (FPUnreachable 1)
+                    (False, _, _)     -> return (decideVerifiability 1 fp fpres)
             _ -> do
                 evalRes <- second getCountAndSizes <$> runStateT (doEval numberedExpr getP') initState
                 let nfa = nfaReachability $ fst evalRes
-                    counts = snd evalRes
-                case (maxIter, nfa, counts) of 
-                    (True, _, (_, _, Nothing)) -> return (FPUnreachable (Just n))
-                    (_, False, _)               -> return (FPUnverifiable n)
-                    -- (_, _, (_, _, _, Just p))   -> trace ("FP reached on " ++ (show p)) (makeProof expr' p (Just p) False)
-                    (_, _, (_, _, Just p))   -> makeProof expr' p (Just p) False
-                    _                           -> makeProof expr' (n - 1) fp False
+                    (_, _, fpres) = snd evalRes
+                case (maxIter, nfa, fpres) of 
+                    (True, _, Nothing) -> return (FPUnreachable n)
+                    (_, False, _)      -> return (decideVerifiability n fp fpres)
+                    (_, _, Just p)     -> makeProof expr' p (Just p) False
+                    _                  -> makeProof expr' (n - 1) fp False
 
     initialNumbering = getOrInsert (return ()) (return ()) get modify
 

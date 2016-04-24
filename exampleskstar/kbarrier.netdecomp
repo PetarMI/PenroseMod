@@ -49,7 +49,7 @@ IMPORT id2
 bind choiceproc = (choice * choice) ; mixconn ; (proc * id2) in 
 -- bind procs = n_sequence read choiceproc in
 -- kbarrier ; procs ; rightend2
--- bind procs = starcase read rightend2 (\x : Net 2 0 . choiceproc ; x) in
--- kbarrier ; procs
-bind procs = starcase read kbarrier (\x : Net 0 2 . x ; choiceproc) in 
-procs ; rightend2
+bind procs = starcase read rightend2 (\x : Net 2 0 . choiceproc ; x) in
+kbarrier ; procs
+-- bind procs = starcase read kbarrier (\x : Net 0 2 . x ; choiceproc) in 
+-- procs ; rightend2
