@@ -175,7 +175,9 @@ tests =
         , testCase "nfa quotient 2" quotientNFA2
         ]
     , testGroup "NFA equivalence"
-        [ testCase "nfa equivalence" equivalenceNFA
+        [ testCase "nfa equivalence1" equivalenceNFA
+        , testCase "nfa equivalence2" equivalenceNFA2
+        , testCase "nfa equivalence3" equivalenceNFA3
         ]
     , testGroup "NFA minimisation" $
         hUnitTestToTests (TestLabel "Can do Actions" $ TestList canDoActions)
@@ -217,7 +219,6 @@ tests =
         ]
     , testGroup "To strings"
         [ testCase "simple to DotNet" simpleDotNet
-        , testCase "simple to LOLANet" simpleLOLANet
         ]
     , testGroup "Reassociations"
         [ testCase "ReassociationsOr1" reassocOr1
@@ -1779,6 +1780,7 @@ quotientNFA2 = res @?= (expected, Any True)
                          , "2"
                          ]
 
+-- test for nfa equivalence, which is used for the fixed-point detection
 equivalenceNFA :: Assertion
 equivalenceNFA =
     assertBool "Shouldn't be equivalent!" (not $ equivalenceHKC nfa1 nfa2)
@@ -2066,7 +2068,7 @@ typeChecking8 :: Assertion
 typeChecking8 = doTypeCheck input nameMap expectedOr
     where 
     input = [ "bind opb = n in"
-            , "leftend ; starcase read rightend (\\x : Net 2 1 . opb ; x)" 
+            , "starcase read leftend (\\x : Net 1 2 . x ; opb) ; rightend" 
             ]
 
     nameMap = [ ("leftend", (0, 1))
@@ -2079,10 +2081,10 @@ typeChecking8 = doTypeCheck input nameMap expectedOr
                                (EStarCase
                                    ERead
                                    (EPreComputed (1, 0))
-                                   (ELam (ESeq (EVar (VarId 1)) (EVar (VarId 0))))
+                                   (ELam (ESeq (EVar (VarId 0)) (EVar (VarId 1))))
                                    (ENum 1)))
 
-    expectedOr = Left "InvalidCompose 1 1 2 1"
+    expectedOr = Left "InvalidCompose 1 2 1 1"
 
 -- test invalid type check of sequence inside lambda
 typeChecking9 :: Assertion
@@ -2608,7 +2610,53 @@ nfaReachability6 = reachCheck @?= False
                         , "1--00/000,01/001,10/010,11/011->1"
                         ]
 
-        reachCheck = nfaReachability nfa             
+        reachCheck = nfaReachability nfa 
+
+equivalenceNFA2 :: Assertion
+equivalenceNFA2 =
+    assertBool "Should be equivalent!" (equivalenceHKC nfa1 nfa2)
+  where
+    nfa1 = textToNFA [ "0"
+                     , "0--000000->0"
+                     , "0--000100,100000->1"
+                     , "1--000001,001000->0"
+                     , "1--000000,000010,0100*0->1"
+                     , "0"
+                     ]
+
+    nfa2 = textToNFA [ "0"
+                     , "0--000000->0"
+                     , "0--000100,100000->1"
+                     , "1--000001,001000->0"
+                     , "1--000000,000010,0100*0->1"
+                     , "0"
+                     ]
+
+equivalenceNFA3 :: Assertion
+equivalenceNFA3 =
+    assertBool "Should be equivalent!" (equivalenceHKC nfa1 nfa2)
+    where
+    nfa1 = textToNFA [ "0"
+                     , "0--000000->0"
+                     , "0--010000->1"
+                     , "1--100000->0"
+                     , "1--00000*->1"
+                     , "0--000010->2"
+                     , "2--000100->0"
+                     , "2--00*000->2"
+                     , "0"
+                     ]  
+
+    nfa2 = textToNFA[ "0"
+                    , "0--000000->0"
+                    , "0--010000->1"
+                    , "1--100000->0"
+                    , "1--00000*->1"
+                    , "0--000010->2"
+                    , "2--000100->0"
+                    , "2--00*000->2"
+                    , "0"
+                    ]            
 
 -- data BinOp = Add
 --            | Sub
@@ -2751,10 +2799,10 @@ simpleDotNet = (toDot <$> toStringTestNet) @?= Just expected
         , "node [style=filled,fillcolor=grey82,shape = box];"
         , "t1 [label=\"t1\"];"
         , "t2 [label=\"t2\"];"
-        , "\"p2\" -> \"t1\" ;"
-        , "\"t1\" -> \"p1\" ;"
-        , "\"p1\" -> \"t2\" ;"
-        , "\"t2\" -> \"p2\" ;"
+        , "\"p1\" -> \"t1\" ;"
+        , "\"t1\" -> \"p2\" ;"
+        , "\"p2\" -> \"t2\" ;"
+        , "\"t2\" -> \"p1\" ;"
         , "}"
         ]
 
@@ -2776,7 +2824,7 @@ toStringTestNet = Nets.compose opbs eps >>= Nets.compose eta
 
     eps = mkNet 2 0 [] [ [LB 0, LB 1] ]
 
-simpleLOLANet :: Assertion
+{--simpleLOLANet :: Assertion
 simpleLOLANet =
     (unparseLOLANet (listToMarkingList []) . net2LOLANet <$> toStringTestNet)
     @?= Just expected
@@ -2791,4 +2839,4 @@ simpleLOLANet =
         , "CONSUME P0 : 1;"
         , "PRODUCE P1 : 1;"
         , "ANALYSE MARKING "
-        ]
+        ]--}
